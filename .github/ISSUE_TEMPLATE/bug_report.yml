@@ -1,0 +1,28 @@
+name: Bug report
+description: Report incorrect discovery, verification, proof, or REG behavior
+title: "[bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Include the command, target shape, and observed AegisGraph result.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What semantic result did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Minimal evidence / reproduction
+      description: A small public fixture is ideal. Do not paste secrets or proprietary code.
+  - type: input
+    id: version
+    attributes:
+      label: AegisGraph version
+      placeholder: 1.0.0

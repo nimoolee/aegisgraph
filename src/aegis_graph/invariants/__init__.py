@@ -1,0 +1,1 @@
+"""Invariant definition and execution."""

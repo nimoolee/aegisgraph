@@ -1,0 +1,27 @@
+name: AI coding semantic failure
+description: Share a real bug where normal tests/review missed the semantic regression
+title: "[failure-mode] "
+labels: [failure-mode]
+body:
+  - type: textarea
+    id: change
+    attributes:
+      label: What did the coding agent change?
+    validations:
+      required: true
+  - type: textarea
+    id: invariant
+    attributes:
+      label: What rule or invariant was silently broken?
+    validations:
+      required: true
+  - type: textarea
+    id: missed
+    attributes:
+      label: Why did existing tests or review miss it?
+    validations:
+      required: true
+  - type: textarea
+    id: ideal
+    attributes:
+      label: What evidence could have detected it earlier?
