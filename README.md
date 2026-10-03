@@ -46,12 +46,21 @@ Change Proof + Repair Contract
 
 AegisGraph v1.0 has no runtime third-party dependencies and requires Python 3.11+.
 
+Fastest install directly from GitHub:
+
+```bash
+python3 -m pip install "git+https://github.com/nimoolee/aegisgraph.git@v1.0.0"
+aegis demo
+```
+
+For contributors who want an editable checkout:
+
 ```bash
 git clone https://github.com/nimoolee/aegisgraph.git
 cd aegisgraph
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e '.[dev]'
 ```
 
 Run the dependency-free proof demo:

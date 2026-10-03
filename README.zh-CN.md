@@ -25,12 +25,21 @@ AegisGraph 把这些问题当成“验证问题”，而不是“提示词写得
 
 ## 5 分钟开始
 
+最快的方式是直接从 GitHub 安装：
+
+```bash
+python3 -m pip install "git+https://github.com/nimoolee/aegisgraph.git@v1.0.0"
+aegis demo
+```
+
+如果你要参与开发，再使用可编辑安装：
+
 ```bash
 git clone https://github.com/nimoolee/aegisgraph.git
 cd aegisgraph
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e '.[dev]'
 ```
 
 先跑一个完全不依赖业务系统的公开 Demo：
