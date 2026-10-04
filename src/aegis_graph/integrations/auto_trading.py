@@ -55,6 +55,8 @@ def build_graph() -> SoftwareGraph:
         FactNode("auto.cash.clob_free", "Physical CLOB Free Cash", kind="money", metadata=_static(Criticality.CRITICAL)),
         FactNode("auto.cash.safety", "Safety Cash Ledger", kind="money", metadata=_static(Criticality.CRITICAL)),
         FactNode("auto.capital.flat", "No Live Position Or Settlement Owns Cash", kind="boolean", metadata=_static(Criticality.CRITICAL)),
+        FactNode("auto.capital.sweep_formula_valid", "Recorded Safety Sweeps Obey Doubling Formula", kind="boolean", metadata=_static(Criticality.CRITICAL)),
+        FactNode("auto.capital.sweep_count", "Recorded Safety Sweep Count", kind="count", metadata=_static(Criticality.HIGH)),
         FactNode("auto.cash.orderable", "Orderable Automatic Cash", kind="money", metadata=_static(Criticality.CRITICAL)),
         FactNode("auto.order.minimum", "Minimum Executable Order", kind="money", metadata=_static(Criticality.HIGH)),
         FactNode("auto.position.manual_exists", "Manual Position Exists", kind="boolean", metadata=_static(Criticality.HIGH)),
@@ -197,6 +199,15 @@ def build_graph() -> SoftwareGraph:
     )
     graph.add_invariant(
         Invariant(
+            id="auto.inv.safety_sweep_obeys_doubling_formula",
+            name="Every recorded Safety sweep must obey the accepted Trading doubling formula",
+            facts=("auto.capital.sweep_formula_valid", "auto.capital.sweep_count"),
+            expression="every SAFETY_SWEEP: trade_before >= 2*baseline_before; moved=floor(trade_before/2,0.01); baseline_after=trade_after; next_target=2*baseline_after",
+            metadata=_static(Criticality.CRITICAL),
+        )
+    )
+    graph.add_invariant(
+        Invariant(
             id="auto.inv.low_trading_cash_blocks_explicitly",
             name="True low Trading Cash must produce the explicit low-cash block reason",
             facts=(
@@ -306,6 +317,7 @@ def create_engine() -> AegisEngine:
     engine.register_invariant_validator("auto.inv.manual_position_never_vetoes_signal", _manual_position_never_vetoes)
     engine.register_invariant_validator("auto.inv.orderable_respects_cash", _orderable_respects_cash)
     engine.register_invariant_validator("auto.inv.flat_cash_partition_conservation", _flat_cash_partition_conservation)
+    engine.register_invariant_validator("auto.inv.safety_sweep_obeys_doubling_formula", _safety_sweep_obeys_doubling_formula)
     engine.register_invariant_validator("auto.inv.low_trading_cash_blocks_explicitly", _low_trading_cash_blocks)
     engine.register_invariant_validator("auto.inv.mixed_sell_cash_conservation", _mixed_sell_cash_conservation)
     engine.register_invariant_validator("auto.inv.mixed_sell_share_conservation", _mixed_sell_share_conservation)
@@ -390,6 +402,12 @@ def _flat_cash_partition_conservation(facts: Mapping[str, Any]) -> tuple[bool, s
     gap = clob - safety - trading
     passed = abs(gap) <= MONEY_TOLERANCE
     return passed, f"clob={clob} safety={safety} trading={trading} gap={gap}"
+
+
+def _safety_sweep_obeys_doubling_formula(facts: Mapping[str, Any]) -> tuple[bool, str]:
+    valid = bool(facts["auto.capital.sweep_formula_valid"])
+    count = int(facts["auto.capital.sweep_count"])
+    return valid, f"recorded_sweeps={count} formula_valid={valid}"
 
 
 def _low_trading_cash_blocks(facts: Mapping[str, Any]) -> tuple[bool, str]:
