@@ -7,15 +7,18 @@ standard REG view and never changes semantics, evidence, or target software.
 from __future__ import annotations
 
 import html
-import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+
+from aegis_graph.audit.invocations import resolve_output_path
+from aegis_graph.ui._html_safety import json_for_script
 
 
 def render_spatial_html(payload: Mapping[str, Any], *, title: str = "AegisGraph Spatial REG") -> str:
     """Render a self-contained 2.5D spatial REG dashboard."""
 
-    data = json.dumps(payload, ensure_ascii=False, default=str).replace("</", "<\\/")
+    data = json_for_script(payload)
     safe_title = html.escape(title)
     template = r'''<!doctype html>
 <html lang="zh-CN">
@@ -87,7 +90,7 @@ const statusLabel=v=>STATUS[v]||String(v??'').toUpperCase(); const modeLabel=v=>
 const el=(name,attrs={})=>{const x=document.createElementNS(NS,name);Object.entries(attrs).forEach(([k,v])=>x.setAttribute(k,v));return x};
 const summary=DATA.summary||{},invSummary=DATA.invocation_summary||{total:0};
 const stats=[['结论 Verdict',statusLabel(summary.verdict),summary.verdict],['事实 Facts',summary.facts],['规则 Rules',summary.rules],['不变量 Invariants',summary.invariants],['通过 PASS',summary.pass,'pass'],['失败 FAIL',summary.fail,'fail'],['未知 UNKNOWN',summary.unknown,'unknown'],['已记录运行 Runs',invSummary.total]];
-document.getElementById('stats').innerHTML=stats.map(([k,v,s])=>`<div class="stat"><label>${esc(k)}</label><b class="${s?'status-'+s:''}">${esc(v)}</b></div>`).join('');
+document.getElementById('stats').innerHTML=stats.map(([k,v,s])=>`<div class="stat"><label>${esc(k)}</label><b class="${esc(s?'status-'+s:'')}">${esc(v)}</b></div>`).join('');
 const latest=(DATA.invocations||[])[0]||{};document.getElementById('targetName').textContent=(latest.target||'—').split('/').filter(Boolean).pop()||'—';document.getElementById('snapshot').textContent=(latest.evidence_snapshot_id||'—').slice(0,12);
 const LAYERS={context:{y:125,label:'04 · 上下文 CONTEXT',sub:'适用范围与语义环境',width:1320},invariant:{y:315,label:'03 · 不变量 INVARIANT',sub:'必须始终成立的约束',width:1400},rule:{y:530,label:'02 · 规则 RULE',sub:'事实之间的逻辑与公式',width:1460},fact:{y:755,label:'01 · 事实 FACT',sub:'代码与运行证据映射出的事实',width:1510}};
 const positions=new Map();
@@ -110,7 +113,7 @@ function startNodeDrag(ev,id){ev.preventDefault();ev.stopPropagation();selectNod
 function moveNodeDrag(ev){if(!nodeDrag||ev.pointerId!==nodeDrag.pointerId)return;const d=svgDelta(ev.clientX-nodeDrag.lastX,ev.clientY-nodeDrag.lastY);if(Math.abs(ev.clientX-nodeDrag.lastX)+Math.abs(ev.clientY-nodeDrag.lastY)>1)nodeDrag.moved=true;const p=positions.get(nodeDrag.id);if(p){p.x+=d.x;p.y+=d.y;placeNode(nodeDrag.id);updateEdgesFor(nodeDrag.id)}nodeDrag.lastX=ev.clientX;nodeDrag.lastY=ev.clientY}
 function endNodeDrag(ev){if(!nodeDrag||ev.pointerId!==nodeDrag.pointerId)return false;nodeEls.get(nodeDrag.id)?.classList.remove('dragging');suppressCanvasClick=nodeDrag.moved;nodeDrag=null;return true}
 const priority=['id','display_name','name','kind','status','verification_status','verification_message','expression','applies_when','value','version','provenance','confidence','criticality','commit_sha','valid_from','valid_to','inputs','outputs','facts','contexts','source_anchors','evidence_sources','description','attributes'];
-function showNode(id){const n=byId.get(id),d=n.details||{};document.getElementById('inspectTitle').textContent=n.label;document.getElementById('inspectPills').innerHTML=`<span class="pill">${esc(TYPE[n.type]||n.type)}</span><span class="pill">${esc(statusLabel(n.status))}</span>${n.impacted?'<span class="pill">受影响 IMPACTED</span>':''}`;document.getElementById('inspectBody').innerHTML=priority.filter(k=>d[k]!==undefined&&d[k]!==null&&d[k]!==''&&(!Array.isArray(d[k])||d[k].length)).map(k=>`<div class="kv"><label>${esc(fieldLabel(k))}</label><pre>${esc((k==='status'||k==='verification_status')?statusLabel(d[k]):typeof d[k]==='object'?JSON.stringify(d[k],null,2):d[k])}</pre></div>`).join('')+`<button class="btn focus-btn" onclick="focusNode('${id.replaceAll("'","\\'")}')">聚焦此节点 · Focus</button>`}
+function showNode(id){const n=byId.get(id),d=n.details||{};document.getElementById('inspectTitle').textContent=n.label;document.getElementById('inspectPills').innerHTML=`<span class="pill">${esc(TYPE[n.type]||n.type)}</span><span class="pill">${esc(statusLabel(n.status))}</span>${n.impacted?'<span class="pill">受影响 IMPACTED</span>':''}`;const body=document.getElementById('inspectBody');body.innerHTML=priority.filter(k=>d[k]!==undefined&&d[k]!==null&&d[k]!==''&&(!Array.isArray(d[k])||d[k].length)).map(k=>`<div class="kv"><label>${esc(fieldLabel(k))}</label><pre>${esc((k==='status'||k==='verification_status')?statusLabel(d[k]):typeof d[k]==='object'?JSON.stringify(d[k],null,2):d[k])}</pre></div>`).join('')+`<button class="btn focus-btn">聚焦此节点 · Focus</button>`;body.querySelector('.focus-btn')?.addEventListener('click',()=>focusNode(id))}
 SVG.addEventListener('click',e=>{if(suppressCanvasClick){suppressCanvasClick=false;return}if(!e.target.closest('.node'))clearSelection()});
 let view={x:0,y:0,w:1600,h:1080},viewFrame=0;function setView(){if(viewFrame)return;viewFrame=requestAnimationFrame(()=>{SVG.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`);viewFrame=0})}
 function resetView(){view={x:0,y:0,w:1600,h:1080};setView();clearSelection()}
@@ -125,17 +128,23 @@ function showAll(){riskOnly=false;clearSelection();nodeEls.forEach(g=>g.style.op
 document.getElementById('riskBtn').onclick=applyRiskFilter;document.getElementById('allBtn').onclick=showAll;
 const runs=document.getElementById('runs'),records=DATA.invocations||[];document.getElementById('runCount').textContent=`${records.length} recent · ${invSummary.total||0} tracked`;
 function showRun(r){document.getElementById('inspectTitle').textContent='历史运行记录 · Historical Invocation';document.getElementById('inspectPills').innerHTML=`<span class="pill">${esc(modeLabel(r.mode))}</span><span class="pill">${esc('历史 · Historical '+statusLabel(r.verdict||r.status))}</span>`;document.getElementById('inspectBody').innerHTML=Object.entries(r).filter(([,v])=>v!==null&&v!=='').map(([k,v])=>`<div class="kv"><label>${esc(fieldLabel(k))}</label><pre>${esc(k==='mode'?modeLabel(v):(k==='verdict'||k==='status')?statusLabel(v):v)}</pre></div>`).join('')}
-runs.innerHTML=records.length?records.map((r,i)=>`<div class="run ${esc(r.verdict||'')}" data-i="${i}"><div class="top"><span class="history-state">${esc('历史 '+statusLabel(r.verdict||r.status))}</span><span>${r.duration_ms??'—'} ms</span></div><div class="mode">${esc(modeLabel(r.mode))}</div><div class="time">${esc(new Date(r.timestamp).toLocaleString('zh-CN'))}</div></div>`).join(''):'<div class="empty">暂无运行记录 · No invocation records yet</div>';
+runs.innerHTML=records.length?records.map((r,i)=>`<div class="run ${esc(r.verdict||'')}" data-i="${i}"><div class="top"><span class="history-state">${esc('历史 '+statusLabel(r.verdict||r.status))}</span><span>${esc(r.duration_ms??'—')} ms</span></div><div class="mode">${esc(modeLabel(r.mode))}</div><div class="time">${esc(new Date(r.timestamp).toLocaleString('zh-CN'))}</div></div>`).join(''):'<div class="empty">暂无运行记录 · No invocation records yet</div>';
 runs.addEventListener('click',e=>{const item=e.target.closest('.run');if(item)showRun(records[Number(item.dataset.i)])});
 </script>
 </body></html>'''
     return template.replace("__TITLE__", safe_title).replace("__DATA__", data)
 
 
-def write_spatial_html(path: str | Path, payload: Mapping[str, Any], *, title: str = "AegisGraph Spatial REG") -> Path:
-    """Write one self-contained spatial dashboard and return its resolved path."""
+def write_spatial_html(
+    path: str | Path,
+    payload: Mapping[str, Any],
+    *,
+    title: str = "AegisGraph Spatial REG",
+    target_root: str | Path | None = None,
+) -> Path:
+    """Write one self-contained spatial dashboard outside any declared target."""
 
-    output = Path(path).expanduser().resolve()
+    output = resolve_output_path(path, target_root=target_root)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_spatial_html(payload, title=title), encoding="utf-8")
     return output

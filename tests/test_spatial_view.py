@@ -1,4 +1,6 @@
-from aegis_graph.ui.spatial_view import render_spatial_html
+import pytest
+
+from aegis_graph.ui.spatial_view import render_spatial_html, write_spatial_html
 
 
 def _payload() -> dict:
@@ -57,3 +59,34 @@ def test_spatial_view_embeds_bilingual_node_data() -> None:
     assert "现金 · Cash" in html
     assert "现金守恒 · Cash Conservation" in html
     assert "accepted_rule_proof" in html
+
+
+def test_spatial_view_does_not_embed_untrusted_node_id_in_inline_handler() -> None:
+    payload = _payload()
+    payload["nodes"][0]["id"] = "x');alert(1);//"
+    payload["nodes"][0]["details"]["id"] = "x');alert(1);//"
+    html = render_spatial_html(payload)
+    assert "onclick=\"focusNode(" not in html
+    assert "querySelector('.focus-btn')" in html
+
+
+def test_spatial_view_escapes_script_terminators_in_payload() -> None:
+    payload = _payload()
+    payload["nodes"][0]["label"] = "</ScRiPt><script>alert(1)</script>"
+    html = render_spatial_html(payload)
+    assert "</ScRiPt>" not in html
+    assert "\\u003c/ScRiPt\\u003e" in html
+    assert "${esc(r.duration_ms??'—')} ms" in html
+    assert "class=\"${esc(s?'status-'+s:'')}\"" in html
+
+
+def test_spatial_writer_rejects_output_inside_declared_target(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+
+    with pytest.raises(ValueError, match="inside the target"):
+        write_spatial_html(
+            target / "spatial.html",
+            _payload(),
+            target_root=target,
+        )

@@ -7,13 +7,18 @@ single HTML file that can be opened directly or served by Python's stdlib HTTP s
 from __future__ import annotations
 
 import html
-import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
-from aegis_graph.audit.invocations import InvocationRecord, summarize_invocations
+from aegis_graph.audit.invocations import (
+    InvocationRecord,
+    resolve_output_path,
+    summarize_invocations,
+)
 from aegis_graph.graph.store import SoftwareGraph
 from aegis_graph.proof.models import ChangeProof
+from aegis_graph.ui._html_safety import json_for_script
 
 
 def _metadata(value: Any) -> dict[str, Any]:
@@ -147,7 +152,7 @@ def build_graph_payload(
                 "details": {
                     "id": context.id,
                     "kind": context.kind,
-                    "attributes": context.attributes,
+                    "attributes": dict(context.attributes),
                     **_metadata(context),
                 },
             }
@@ -201,7 +206,7 @@ def build_graph_payload(
 def render_graph_html(payload: Mapping[str, Any], *, title: str = "AegisGraph") -> str:
     """Render one portable, dependency-free HTML knowledge graph."""
 
-    data = json.dumps(payload, ensure_ascii=False, default=str).replace("</", "<\\/")
+    data = json_for_script(payload)
     safe_title = html.escape(title)
     return f'''<!doctype html>
 <html lang="zh-CN">
@@ -273,7 +278,7 @@ const summary = DATA.summary, invSummary = DATA.invocation_summary || {{total:0,
 document.getElementById('cards').innerHTML = [
  ['结论 Verdict', labelStatus(summary.verdict)], ['事实 Facts', summary.facts], ['规则 Rules', summary.rules], ['不变量 Invariants', summary.invariants],
  ['通过 PASS',summary.pass],['失败 FAIL',summary.fail],['未知 UNKNOWN',summary.unknown],['已记录运行 Tracked Runs',invSummary.total]
-].map(x=>`<div class="card">${{x[0]}} <b>${{x[1]}}</b></div>`).join('');
+].map(x=>`<div class="card">${{esc(x[0])}} <b>${{esc(x[1])}}</b></div>`).join('');
 
 const columns = {{ fact:120, rule:470, invariant:820, context:1050 }};
 const groups = {{ fact:[], rule:[], invariant:[], context:[] }};
@@ -330,10 +335,11 @@ def write_graph_html(
     display_labels: Mapping[str, str] | None = None,
     invocations: tuple[InvocationRecord, ...] = (),
     title: str = "AegisGraph",
+    target_root: str | Path | None = None,
 ) -> Path:
     """Write one portable graph page and return its resolved path."""
 
-    output = Path(path).expanduser().resolve()
+    output = resolve_output_path(path, target_root=target_root)
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = build_graph_payload(
         graph,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 
 from aegis_graph import __version__
@@ -36,35 +37,78 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _append_cli_audit(*, target: str, verdict: str | None, note: str) -> None:
+    """Best-effort Aegis-owned audit logging; never mutate or gate the target."""
+
+    try:
+        append_invocation(
+            new_record(
+                mode="semantic_discovery",
+                target=target,
+                source="aegis_cli",
+                verdict=verdict,
+                note=note,
+            )
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"AEGISGRAPH AUDIT WARNING: {exc}", file=sys.stderr)
+
+
 def _discover(args: argparse.Namespace, *, fail_on_conflict: bool) -> int:
     discovery = discover_python(args.target)
     unified = unify_discovery(discovery)
     print(render_unification(unified, contains=args.contains, limit=args.limit))
+    if discovery.warnings:
+        print("\nAEGISGRAPH SOURCE WARNINGS", file=sys.stderr)
+        for warning in discovery.warnings:
+            print(f"- {warning}", file=sys.stderr)
     conflicts = detect_conflicts(unified)
     if fail_on_conflict or getattr(args, "conflicts", False):
         print()
         print(render_conflicts(conflicts, unified))
-    append_invocation(
-        new_record(
-            mode="semantic_discovery",
-            target=args.target,
-            source="aegis_cli",
-            note=f"conflicts={len(conflicts.conflicts)} concepts={len(unified.concepts)}",
+
+    scan_incomplete = bool(discovery.warnings)
+    verdict: str | None
+    if fail_on_conflict and conflicts.conflicts:
+        exit_code = 1
+        verdict = "fail"
+    elif fail_on_conflict and scan_incomplete:
+        exit_code = 2
+        verdict = "unknown"
+        print(
+            "\nAEGISGRAPH SCAN STATUS: UNKNOWN — source evidence is incomplete; "
+            "see warnings above.",
+            file=sys.stderr,
         )
+    else:
+        exit_code = 0
+        verdict = "pass" if fail_on_conflict else None
+
+    _append_cli_audit(
+        target=args.target,
+        verdict=verdict,
+        note=(
+            f"conflicts={len(conflicts.conflicts)} concepts={len(unified.concepts)} "
+            f"scan_warnings={len(discovery.warnings)}"
+        ),
     )
-    return 1 if fail_on_conflict and conflicts.conflicts else 0
+    return exit_code
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "demo":
-        print(render_demo())
-        return 0
-    if args.command == "discover":
-        return _discover(args, fail_on_conflict=False)
-    if args.command == "check":
-        return _discover(args, fail_on_conflict=True)
-    raise AssertionError(f"unhandled command: {args.command}")
+    try:
+        if args.command == "demo":
+            print(render_demo())
+            return 0
+        if args.command == "discover":
+            return _discover(args, fail_on_conflict=False)
+        if args.command == "check":
+            return _discover(args, fail_on_conflict=True)
+        raise AssertionError(f"unhandled command: {args.command}")
+    except (OSError, ValueError) as exc:
+        print(f"AEGISGRAPH ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 def console_main() -> None:
