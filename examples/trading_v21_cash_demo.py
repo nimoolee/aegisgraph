@@ -3,7 +3,6 @@
 from aegis_graph.core.models import Change, ChangeType
 from aegis_graph.integrations.trading_v21 import create_engine
 
-
 change = Change(
     id="demo.execution_balance_change",
     type=ChangeType.SOURCE_CHANGE,
