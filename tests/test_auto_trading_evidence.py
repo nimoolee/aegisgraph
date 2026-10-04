@@ -125,6 +125,24 @@ def test_system_audit_uses_invariants_to_reject_contradictory_persisted_ownershi
     assert proof.repair_contract is not None
 
 
+def test_safety_sweep_formula_invariant_rejects_bad_recorded_sweep(tmp_path: Path) -> None:
+    _write_target(tmp_path)
+    ledger = tmp_path / "runtime" / "live_test_orders.jsonl"
+    bad_sweep = {
+        "kind": "SAFETY_SWEEP",
+        "trade_before": 20.0, "baseline_before": 10.0,
+        "moved_to_safety": 10.0, "safe_before": 50.0, "safe_after": 60.0,
+        "trade_after": 10.0, "baseline_after": 10.0,
+        "next_double_target": 25.0,
+    }
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(bad_sweep) + "\n")
+
+    proof = audit_target(tmp_path).proof
+    failed = {check.invariant_id for check in proof.invariant_checks if check.status.value == "fail"}
+    assert "auto.inv.safety_sweep_obeys_doubling_formula" in failed
+
+
 def test_malformed_ledger_marks_evidence_incomplete_and_prevents_pass(tmp_path: Path) -> None:
     _write_target(tmp_path)
     ledger = tmp_path / "runtime" / "live_test_orders.jsonl"

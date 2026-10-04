@@ -7,6 +7,8 @@ unchanged and auditable.
 AUTO_TRADING_DISPLAY_LABELS = {
     "auto.cash.bot_sell_proceeds": "机器人归属卖出收入 · Bot-Owned SELL Proceeds",
     "auto.capital.flat": "资金归属已完成对账 · Capital Attribution Reconciled",
+    "auto.capital.sweep_formula_valid": "历史翻倍封存公式有效 · Safety Sweep Formula Valid",
+    "auto.capital.sweep_count": "历史翻倍封存次数 · Safety Sweep Count",
     "auto.cash.clob_free": "CLOB 物理可用现金 · Physical CLOB Free Cash",
     "auto.cash.manual_sell_proceeds": "手动归属卖出收入 · Manual-Owned SELL Proceeds",
     "auto.cash.orderable": "自动交易可下单现金 · Orderable Automatic Cash",
@@ -30,6 +32,7 @@ AUTO_TRADING_DISPLAY_LABELS = {
     "auto.signal.execution_decision": "自动信号执行决定 · Automatic Signal Execution Decision",
     "auto.rule.mixed_sell_partition": "物理卖出按手动/机器人/未知归属拆分 · Partition Physical SELL Ownership",
     "auto.rule.signal_execution_decision": "自动信号执行门槛 · Automatic Signal Execution Gate",
+    "auto.inv.safety_sweep_obeys_doubling_formula": "翻倍封存必须严格遵守公式 · Safety Sweep Must Obey Doubling Formula",
     "auto.inv.low_trading_cash_blocks_explicitly": "真实低交易现金必须明确阻止下单 · Explicit Low-Cash Block",
     "auto.inv.manual_position_never_vetoes_signal": "手动持仓不得否决可执行自动信号 · Manual Position Must Not Veto Auto Signal",
     "auto.inv.manual_sell_does_not_exceed_manual_ownership": "手动卖出归属不得超过手动持有份额 · Manual Sell Attribution ≤ Manual Ownership",

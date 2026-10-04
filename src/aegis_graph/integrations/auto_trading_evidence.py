@@ -15,7 +15,7 @@ import shutil
 import subprocess  # nosec B404
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, cast
 
@@ -51,6 +51,43 @@ def _decimal(value: Any) -> Decimal | None:
     except (InvalidOperation, TypeError, ValueError):
         return None
     return parsed if parsed.is_finite() else None
+
+
+def _safety_sweep_formula_status(rows: list[dict[str, Any]]) -> tuple[bool, int]:
+    """Verify every recorded Safety sweep against the accepted doubling formula."""
+
+    count = 0
+    for row in rows:
+        if row.get("kind") != "SAFETY_SWEEP":
+            continue
+        count += 1
+        trade_before = _decimal(row.get("trade_before"))
+        baseline_before = _decimal(row.get("baseline_before"))
+        moved = _decimal(row.get("moved_to_safety"))
+        safe_before = _decimal(row.get("safe_before"))
+        safe_after = _decimal(row.get("safe_after"))
+        trade_after = _decimal(row.get("trade_after"))
+        baseline_after = _decimal(row.get("baseline_after"))
+        next_target = _decimal(row.get("next_double_target"))
+        if any(value is None for value in (
+            trade_before, baseline_before, moved, safe_before, safe_after,
+            trade_after, baseline_after, next_target,
+        )):
+            return False, count
+        assert trade_before is not None and baseline_before is not None
+        assert moved is not None and safe_before is not None and safe_after is not None
+        assert trade_after is not None and baseline_after is not None and next_target is not None
+        expected_moved = (trade_before / 2).quantize(Decimal("0.01"), rounding=ROUND_FLOOR)
+        if not (
+            trade_before >= 2 * baseline_before
+            and moved == expected_moved
+            and abs(trade_after - (trade_before - moved)) <= Decimal("0.000001")
+            and abs(safe_after - (safe_before + moved)) <= Decimal("0.000001")
+            and abs(baseline_after - trade_after) <= Decimal("0.000001")
+            and abs(next_target - 2 * baseline_after) <= Decimal("0.000001")
+        ):
+            return False, count
+    return True, count
 
 
 def _git_identity(root: Path) -> tuple[str | None, bool | None]:
@@ -335,6 +372,9 @@ def collect_evidence(target_root: str | Path) -> EvidenceSnapshot:
         or attribution_in_flight
     )
     put("auto.capital.flat", capital_flat, "runtime/live_test_state.json:live ownership/settlement state")
+    sweep_formula_valid, sweep_count = _safety_sweep_formula_status(rows)
+    put("auto.capital.sweep_formula_valid", sweep_formula_valid, "runtime/live_test_orders.jsonl:all SAFETY_SWEEP events")
+    put("auto.capital.sweep_count", sweep_count, "runtime/live_test_orders.jsonl:SAFETY_SWEEP count")
     put("auto.cash.orderable", state.get("orderable_balance"), "runtime/live_test_state.json:orderable_balance")
     put("auto.order.minimum", 5, "sanitized Auto Trading reference minimum executable order")
     external = state.get("external_positions")
