@@ -2,6 +2,21 @@
 
 All notable changes to AegisGraph are documented here.
 
+## 1.0.1 — 2026-10-04
+
+Audited v1.0 hardening release. No new product features.
+
+### Fixed
+
+- Enforce fail-closed PASS / FAIL / UNKNOWN behavior when source or runtime evidence is incomplete or malformed.
+- Remove depth-truncation risk from semantic impact reachability and require exact invariant-check coverage in proofs.
+- Make accepted semantic, discovery, impact, governance, and proof value objects resistant to caller-side mutable aliasing.
+- Enforce the read-only target boundary for CLI audit state and official REG report outputs.
+- Harden portable REG HTML against script/DOM injection through untrusted graph or invocation data.
+- Stream and content-hash runtime evidence with bounded input sizes and explicit snapshot-integrity warnings.
+- Add locked, reproducible CI quality gates for Ruff, mypy strict, Bandit, package build, and Twine validation.
+- Sanitize private benchmark repository paths, commit identifiers, and incident references from the public source tree.
+
 ## 1.0.0 — 2026-10-03
 
 First public product release.

@@ -3,7 +3,6 @@
 from aegis_graph.core.models import Change, ChangeType
 from aegis_graph.integrations.auto_trading import create_engine
 
-
 PHYSICAL_PROCEEDS = "41.03646"
 MANUAL_PROCEEDS = "31.37607664660993"
 BOT_PROCEEDS = "9.66038335339007"

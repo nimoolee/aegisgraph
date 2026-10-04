@@ -6,8 +6,9 @@ from a specific reference system and anchors them to observed source code.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from aegis_graph.core.models import (
     ConfidenceSource,
@@ -22,25 +23,13 @@ from aegis_graph.core.models import (
 from aegis_graph.engine import AegisEngine
 from aegis_graph.graph.store import SoftwareGraph
 
-
-REFERENCE_COMMIT = "785b6863953ff9e3f08e04cfdfd2383ce5cb3923"
-
-# Human-readable evidence anchors captured from the reference repository.
-# They are intentionally integration metadata, not hard-coded AegisGraph Core logic.
+# Sanitized provenance labels preserve the reference integration shape without
+# publishing private repository paths or commit identifiers.
 SOURCE_ANCHORS: dict[str, tuple[str, ...]] = {
-    "v21.cash.execution_balance": (
-        "backend/src/poly5m/execution/buy.py:171-175",
-    ),
-    "v21.account.snapshot.execution_balance": (
-        "backend/src/poly5m/transport/server.py:78-94",
-        "frontend/src/stores/domains.ts:9-20",
-    ),
-    "v21.order.manual_buy_eligibility": (
-        "frontend/src/components/AccountPanel/presentation.ts:53-62",
-    ),
-    "v21.ui.manual_buy_button_enabled": (
-        "frontend/src/components/AccountPanel/AccountPanel.tsx:62-85",
-    ),
+    "v21.cash.execution_balance": ("sanitized-reference:v21/execution-balance",),
+    "v21.account.snapshot.execution_balance": ("sanitized-reference:v21/account-snapshot",),
+    "v21.order.manual_buy_eligibility": ("sanitized-reference:v21/manual-buy-eligibility",),
+    "v21.ui.manual_buy_button_enabled": ("sanitized-reference:v21/manual-buy-button",),
 }
 
 
@@ -50,7 +39,6 @@ def _static_metadata(criticality: Criticality) -> Metadata:
         provenance=ConfidenceSource.STATIC,
         confidence=1.0,
         criticality=criticality,
-        commit_sha=REFERENCE_COMMIT,
     )
 
 

@@ -28,7 +28,7 @@ AegisGraph 把这些问题当成“验证问题”，而不是“提示词写得
 最快的方式是直接从 GitHub 安装：
 
 ```bash
-python3 -m pip install "git+https://github.com/nimoolee/aegisgraph.git@v1.0.0"
+python3 -m pip install "git+https://github.com/nimoolee/aegisgraph.git@v1.0.1"
 aegis demo
 ```
 

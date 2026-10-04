@@ -49,8 +49,8 @@ Those are later stages.
 
 ## First blind benchmark
 
-The first benchmark target is `99safe-live-test`, but the discovery engine contains no Trading Cash,
-CLOB Cash, Orderable Cash, Polymarket, or 98safe vocabulary.
+The first benchmark target is a reference auto-trading system, but the discovery engine contains no
+project-specific account labels, venue names, strategy names, or private repository vocabulary.
 
 Success means the generic extractor can independently recover implementation structure such as:
 

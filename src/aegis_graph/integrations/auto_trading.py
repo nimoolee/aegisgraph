@@ -1,15 +1,16 @@
-"""Hand-authored benchmark semantics for the Auto Trading reference system.
+"""Hand-authored semantics for a sanitized Auto Trading reference benchmark.
 
-This module is a verification/reference benchmark created before Semantic Discovery
-v0.1.  Product discovery must not use it as an answer key or source of truth.  The
-reference system currently lives in 99safe-live-test; AegisGraph Core remains
+This module preserves a real-world verification shape without exposing the original
+private target repository, incident identifiers, or source paths. Product discovery
+must not use it as an answer key or source of truth; AegisGraph Core remains
 domain-agnostic.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any
 
 from aegis_graph.core.models import (
     ConfidenceSource,
@@ -25,50 +26,17 @@ from aegis_graph.engine import AegisEngine
 from aegis_graph.graph.store import SoftwareGraph
 from aegis_graph.proof.models import RepairDirective
 
-
-REFERENCE_COMMIT = "WORKTREE:545b0a319e7a9993cf96368f35184a59f5d28964+incident-evidence"
-
 SOURCE_ANCHORS: dict[str, tuple[str, ...]] = {
-    "auto.cash.trading": (
-        "live_test_runner.py:203-219",
-        "live_test_runner.py:1883-1893",
-    ),
-    "auto.cash.clob_free": (
-        "live_test_runner.py:203-219",
-        "live_test_runner.py:1887-1893",
-    ),
-    "auto.position.manual_exists": (
-        "live_test_runner.py:1869-1872",
-        "tests/test_clob_cash_cycle.py:90-97",
-    ),
-    "auto.signal.execution_decision": (
-        "live_test_runner.py:1867-1893",
-        "tests/test_clob_cash_cycle.py:99-118",
-    ),
-    "auto.cash.physical_sell_proceeds": (
-        "runtime/live_test_orders.jsonl:eth-updown-5m-1791010800",
-        "docs/CASH_LOSS_GPT_TEST_HANDOFF.md",
-    ),
-    "auto.cash.manual_sell_proceeds": (
-        "runtime/live_test_orders.jsonl:MANUAL_CASH_RETURN",
-        "live_test_runner.py:_apply_manual_cash_returns",
-    ),
-    "auto.cash.bot_sell_proceeds": (
-        "runtime/live_test_orders.jsonl:ownership-gap evidence",
-        "live_test_runner.py:_apply_bot_sell_receipt",
-    ),
-    "auto.position.bot_total_shares": (
-        "runtime/live_test_orders.jsonl:ORDER_RESULT",
-        "live_test_runner.py:bot_buy_fills",
-    ),
-    "auto.position.bot_sold_shares": (
-        "runtime/live_test_orders.jsonl:physical SELL minus manual ownership",
-        "live_test_runner.py:_apply_manual_cash_returns",
-    ),
-    "auto.settlement.expected_redeem_shares": (
-        "runtime/live_test_state.json:settlement_cash_sync_pending",
-        "live_test_runner.py:sync_settled_cash_if_ready",
-    ),
+    "auto.cash.trading": ("sanitized-reference:capital-ledger/trading",),
+    "auto.cash.clob_free": ("sanitized-reference:physical-cash/clob-free",),
+    "auto.position.manual_exists": ("sanitized-reference:ownership/manual-position",),
+    "auto.signal.execution_decision": ("sanitized-reference:execution/decision",),
+    "auto.cash.physical_sell_proceeds": ("sanitized-reference:mixed-sell/physical-receipt",),
+    "auto.cash.manual_sell_proceeds": ("sanitized-reference:mixed-sell/manual-attribution",),
+    "auto.cash.bot_sell_proceeds": ("sanitized-reference:mixed-sell/bot-attribution",),
+    "auto.position.bot_total_shares": ("sanitized-reference:bot-fill/owned-shares",),
+    "auto.position.bot_sold_shares": ("sanitized-reference:mixed-sell/bot-owned-shares",),
+    "auto.settlement.expected_redeem_shares": ("sanitized-reference:settlement/expected-redeem",),
 }
 
 
@@ -77,7 +45,6 @@ def _static(criticality: Criticality) -> Metadata:
         provenance=ConfidenceSource.STATIC,
         confidence=1.0,
         criticality=criticality,
-        commit_sha=REFERENCE_COMMIT,
     )
 
 
