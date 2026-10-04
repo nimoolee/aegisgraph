@@ -74,9 +74,11 @@ def _safety_sweep_formula_status(rows: list[dict[str, Any]]) -> tuple[bool, int]
             trade_after, baseline_after, next_target,
         )):
             return False, count
-        assert trade_before is not None and baseline_before is not None
-        assert moved is not None and safe_before is not None and safe_after is not None
-        assert trade_after is not None and baseline_after is not None and next_target is not None
+        parsed = cast(
+            tuple[Decimal, Decimal, Decimal, Decimal, Decimal, Decimal, Decimal, Decimal],
+            (trade_before, baseline_before, moved, safe_before, safe_after, trade_after, baseline_after, next_target),
+        )
+        trade_before, baseline_before, moved, safe_before, safe_after, trade_after, baseline_after, next_target = parsed
         expected_moved = (trade_before / 2).quantize(Decimal("0.01"), rounding=ROUND_FLOOR)
         if not (
             trade_before >= 2 * baseline_before
