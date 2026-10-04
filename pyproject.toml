@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-graph"
-version = "1.0.1"
+version = "1.0.2"
 description = "Semantic verification and change-proof engine for AI-generated code"
 readme = "README.md"
 requires-python = ">=3.11"

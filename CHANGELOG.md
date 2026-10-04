@@ -2,6 +2,15 @@
 
 All notable changes to AegisGraph are documented here.
 
+## 1.0.2 — 2026-10-04
+
+Cross-platform audit durability fix.
+
+### Fixed
+
+- Serialize audit appends across threads and processes so Windows does not lose concurrent invocation records.
+- Add real macOS 15 and Windows Server 2025 portability CI alongside Linux Python 3.11/3.12/3.13.
+
 ## 1.0.1 — 2026-10-04
 
 Audited v1.0 hardening release. No new product features.

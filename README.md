@@ -49,7 +49,7 @@ AegisGraph v1.0 has no runtime third-party dependencies and requires Python 3.11
 Fastest install directly from GitHub:
 
 ```bash
-python3 -m pip install "git+https://github.com/nimoolee/aegisgraph.git@v1.0.1"
+python3 -m pip install "git+https://github.com/nimoolee/aegisgraph.git@v1.0.2"
 aegis demo
 ```
 
