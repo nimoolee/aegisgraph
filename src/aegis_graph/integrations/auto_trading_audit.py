@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from aegis_graph.core.models import Change, ChangeType
 from aegis_graph.integrations.auto_trading import create_engine
-from aegis_graph.integrations.auto_trading_evidence import EvidenceSnapshot, collect_evidence
-from aegis_graph.proof.models import ChangeProof
+from aegis_graph.integrations.auto_trading_evidence import (
+    EvidenceSnapshot,
+    collect_evidence,
+)
+from aegis_graph.proof.models import ChangeProof, ProofVerdict
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +43,15 @@ def audit_target(target_root: str | Path) -> AutoTradingSystemAudit:
         },
     )
     proof = engine.analyze(change, fact_values=evidence.fact_values)
+    if not evidence.complete and proof.verdict is ProofVerdict.PASS:
+        proof = replace(
+            proof,
+            verdict=ProofVerdict.UNKNOWN,
+            reasons=(
+                *proof.reasons,
+                "evidence snapshot is incomplete; PASS is not permitted",
+            ),
+        )
     return AutoTradingSystemAudit(evidence=evidence, proof=proof)
 
 
@@ -53,6 +65,7 @@ def render_audit(audit: AutoTradingSystemAudit) -> str:
         f"Evidence Snapshot: {evidence.snapshot_id}",
         f"Target Commit: {evidence.commit_sha or 'UNKNOWN'}",
         f"Dirty Worktree: {evidence.dirty_worktree}",
+        f"Evidence Complete: {evidence.complete}",
         "Boundary: READ_ONLY_TARGET",
         f"VERDICT: {proof.verdict.value.upper()}",
         "",

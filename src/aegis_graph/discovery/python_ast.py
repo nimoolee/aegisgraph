@@ -1,6 +1,6 @@
 """Read-only Python AST semantic discovery.
 
-v0.1 deliberately does not know any trading vocabulary.  It extracts candidate
+v1.0 deliberately does not know any trading vocabulary. It extracts candidate
 concepts, formulas and data-flow relationships from code structure while keeping
 file/function/conditional provenance.  Naming/unification into accepted business
 concepts is a later layer.
@@ -9,23 +9,26 @@ concepts is a later layer.
 from __future__ import annotations
 
 import ast
-from collections import defaultdict
-from dataclasses import replace
 import hashlib
+import shutil
+
+# Subprocess is restricted to an absolute Git executable with literal argv and no shell.
+import subprocess  # nosec B404
+import tokenize
+from collections import defaultdict
+from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
-import subprocess
-from typing import Iterable
 
 from aegis_graph.discovery.models import (
     CandidateCall,
-    CandidateFunction,
     CandidateConcept,
     CandidateFormula,
+    CandidateFunction,
     CandidateRelationship,
     CodeAnchor,
     DiscoveryReport,
 )
-
 
 _EXCLUDED_PARTS = {
     ".git",
@@ -41,10 +44,14 @@ _EXCLUDED_PARTS = {
     "__pycache__",
 }
 
+MAX_SOURCE_FILES = 10_000
+MAX_SOURCE_BYTES = 5 * 1024 * 1024
+MAX_TOTAL_SOURCE_BYTES = 100 * 1024 * 1024
+
 
 def _stable_id(prefix: str, *parts: object) -> str:
     raw = "\x1f".join(str(part) for part in parts)
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
     return f"{prefix}.{digest}"
 
 
@@ -63,7 +70,7 @@ def _symbol(node: ast.AST) -> str | None:
             return f'{base}["{key.value}"]'
         try:
             return f"{base}[{ast.unparse(key)}]"
-        except Exception:
+        except (RecursionError, ValueError):
             return base
     return None
 
@@ -84,22 +91,22 @@ class _InputCollector(ast.NodeVisitor):
     def __init__(self) -> None:
         self.symbols: set[str] = set()
 
-    def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
+    def visit_Name(self, node: ast.Name) -> None:
         self.symbols.add(node.id)
 
-    def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
+    def visit_Attribute(self, node: ast.Attribute) -> None:
         symbol = _symbol(node)
         if symbol:
             self.symbols.add(symbol)
         # The complete attribute is more useful than also adding its base object.
 
-    def visit_Subscript(self, node: ast.Subscript) -> None:  # noqa: N802
+    def visit_Subscript(self, node: ast.Subscript) -> None:
         symbol = _symbol(node)
         if symbol:
             self.symbols.add(symbol)
         # The complete keyed fact is more useful than also adding the container.
 
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+    def visit_Call(self, node: ast.Call) -> None:
         # ``state.get("trade_cash")`` is a common implicit fact read.  Treat the
         # keyed value as the input rather than the generic ``state.get`` method.
         if (
@@ -182,7 +189,7 @@ class _FileVisitor(ast.NodeVisitor):
             return
         try:
             expression = ast.unparse(expr)
-        except Exception:
+        except (RecursionError, ValueError):
             return
         anchor = self._anchor(node)
         confidence = _confidence(expr, inputs)
@@ -224,7 +231,7 @@ class _FileVisitor(ast.NodeVisitor):
             )
 
     def _record_return_dict(self, node: ast.Return, value: ast.Dict) -> None:
-        for key, expr in zip(value.keys, value.values):
+        for key, expr in zip(value.keys, value.values, strict=True):
             if isinstance(key, ast.Constant) and isinstance(key.value, str):
                 self._record_formula(f'return["{key.value}"]', expr, node)
 
@@ -256,30 +263,30 @@ class _FileVisitor(ast.NodeVisitor):
             )
         )
 
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.class_stack.append(node.name)
         for statement in node.body:
             self.visit(statement)
         self.class_stack.pop()
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._record_function(node)
         self.function_stack.append(node.name)
         for statement in node.body:
             self.visit(statement)
         self.function_stack.pop()
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._record_function(node)
         self.function_stack.append(node.name)
         for statement in node.body:
             self.visit(statement)
         self.function_stack.pop()
 
-    def visit_If(self, node: ast.If) -> None:  # noqa: N802
+    def visit_If(self, node: ast.If) -> None:
         try:
             condition = ast.unparse(node.test)
-        except Exception:
+        except (RecursionError, ValueError):
             condition = "<condition>"
         self.visit(node.test)
         self.context_stack.append(condition)
@@ -292,7 +299,7 @@ class _FileVisitor(ast.NodeVisitor):
                 self.visit(statement)
             self.context_stack.pop()
 
-    def visit_Try(self, node: ast.Try) -> None:  # noqa: N802
+    def visit_Try(self, node: ast.Try) -> None:
         self.context_stack.append("try")
         for statement in node.body:
             self.visit(statement)
@@ -300,7 +307,7 @@ class _FileVisitor(ast.NodeVisitor):
         for handler in node.handlers:
             try:
                 label = ast.unparse(handler.type) if handler.type is not None else "*"
-            except Exception:
+            except (RecursionError, ValueError):
                 label = "*"
             self.context_stack.append(f"except {label}")
             for statement in handler.body:
@@ -317,7 +324,7 @@ class _FileVisitor(ast.NodeVisitor):
                 self.visit(statement)
             self.context_stack.pop()
 
-    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+    def visit_Call(self, node: ast.Call) -> None:
         if isinstance(node.func, ast.Name):
             callee = node.func.id
         elif isinstance(node.func, ast.Attribute):
@@ -330,7 +337,7 @@ class _FileVisitor(ast.NodeVisitor):
             for arg in node.args:
                 try:
                     expressions.append(ast.unparse(arg))
-                except Exception:
+                except (RecursionError, ValueError):
                     expressions.append("<expression>")
                 symbols.append(_input_symbols(arg))
             anchor = self._anchor(node)
@@ -352,26 +359,26 @@ class _FileVisitor(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
-    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+    def visit_Assign(self, node: ast.Assign) -> None:
         for target in node.targets:
             for output in _assignment_targets(target):
                 self._record_formula(output, node.value, node)
         self.visit(node.value)
 
-    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         if node.value is not None:
             for output in _assignment_targets(node.target):
                 self._record_formula(output, node.value, node)
             self.visit(node.value)
 
-    def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
         for output in _assignment_targets(node.target):
             synthetic = ast.BinOp(left=node.target, op=node.op, right=node.value)
             ast.copy_location(synthetic, node)
             self._record_formula(output, synthetic, node)
         self.visit(node.value)
 
-    def visit_Return(self, node: ast.Return) -> None:  # noqa: N802
+    def visit_Return(self, node: ast.Return) -> None:
         if isinstance(node.value, ast.Dict):
             self._record_return_dict(node, node.value)
         if node.value is not None:
@@ -392,27 +399,37 @@ class _FileVisitor(ast.NodeVisitor):
 
 
 def _git_worktree_python_files(root: Path) -> tuple[Path, ...] | None:
-    """Return current Git worktree Python files, including non-ignored new files.
+    """Return Git-owned Python paths without executing repository-controlled code."""
 
-    Git is the preferred boundary because ignored runtime snapshots/backups are
-    historical evidence, not current implementation semantics.  ``None`` means
-    the target is not a usable Git worktree and discovery should fall back to a
-    filesystem scan.
-    """
-
+    git = shutil.which("git")
+    if git is None:
+        if (root / ".git").exists():
+            raise RuntimeError("git executable is unavailable for a Git target")
+        return None
     try:
-        probe = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
-            check=True,
+        # Absolute Git executable + literal argv; shell execution is never enabled.
+        probe = subprocess.run(  # nosec B603
+            [git, "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+            check=False,
             capture_output=True,
             text=True,
             timeout=5,
         )
-        if probe.stdout.strip() != "true":
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"git repository probe failed: {exc}") from exc
+    if probe.returncode != 0:
+        stderr = probe.stderr.lower()
+        if "not a git repository" in stderr:
             return None
-        result = subprocess.run(
+        raise RuntimeError(probe.stderr.strip() or "git repository probe failed")
+    if probe.stdout.strip() != "true":
+        return None
+
+    try:
+        # Absolute Git executable + literal argv; shell execution is never enabled.
+        result = subprocess.run(  # nosec B603
             [
-                "git",
+                git,
                 "-C",
                 str(root),
                 "ls-files",
@@ -427,24 +444,29 @@ def _git_worktree_python_files(root: Path) -> tuple[Path, ...] | None:
             capture_output=True,
             timeout=10,
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"git source selection failed: {exc}") from exc
 
     paths: list[Path] = []
     for raw in result.stdout.split(b"\0"):
         if not raw:
             continue
         relative = Path(raw.decode("utf-8", errors="surrogateescape"))
-        path = root / relative
-        if path.is_file():
-            paths.append(path)
+        paths.append(root / relative)
     return tuple(sorted(paths))
 
 
-def _python_files(root: Path, *, include_tests: bool) -> tuple[Iterable[Path], str]:
-    git_files = _git_worktree_python_files(root)
+def _python_files(
+    root: Path, *, include_tests: bool
+) -> tuple[tuple[Path, ...], str, tuple[str, ...]]:
+    warnings: list[str] = []
+    try:
+        git_files = _git_worktree_python_files(root)
+    except RuntimeError as exc:
+        git_files = None
+        warnings.append(f"source selection degraded to filesystem scan: {exc}")
+
     candidates: Iterable[Path]
-    source_selection: str
     if git_files is not None:
         candidates = git_files
         source_selection = "git_worktree"
@@ -453,8 +475,13 @@ def _python_files(root: Path, *, include_tests: bool) -> tuple[Iterable[Path], s
         source_selection = "filesystem"
 
     selected: list[Path] = []
+    resolved_root = root.resolve()
     for path in candidates:
-        relative = path.relative_to(root)
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            warnings.append(f"source path escaped target root and was skipped: {path}")
+            continue
         parts = set(relative.parts)
         if parts.intersection(_EXCLUDED_PARTS):
             continue
@@ -464,8 +491,20 @@ def _python_files(root: Path, *, include_tests: bool) -> tuple[Iterable[Path], s
             or path.name.endswith("_test.py")
         ):
             continue
-        selected.append(path)
-    return tuple(selected), source_selection
+        if path.is_symlink():
+            warnings.append(f"{relative}: symbolic-link source skipped")
+            continue
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            warnings.append(f"{relative}: {type(exc).__name__}: {exc}")
+            continue
+        if not resolved.is_relative_to(resolved_root):
+            warnings.append(f"{relative}: resolved path escaped target root and was skipped")
+            continue
+        if resolved.is_file():
+            selected.append(resolved)
+    return tuple(selected), source_selection, tuple(warnings)
 
 
 def discover_python(target_root: str | Path, *, include_tests: bool = False) -> DiscoveryReport:
@@ -482,15 +521,43 @@ def discover_python(target_root: str | Path, *, include_tests: bool = False) -> 
     calls: list[CandidateCall] = []
     warnings: list[str] = []
     files_scanned = 0
-    python_files, source_selection = _python_files(root, include_tests=include_tests)
+    python_files, source_selection, selection_warnings = _python_files(
+        root, include_tests=include_tests
+    )
+    warnings.extend(selection_warnings)
+    if not python_files:
+        warnings.append("no Python source files selected; semantic scan is incomplete")
+    if len(python_files) > MAX_SOURCE_FILES:
+        warnings.append(
+            f"source file limit exceeded: {len(python_files)} > {MAX_SOURCE_FILES}; scan truncated"
+        )
+        python_files = python_files[:MAX_SOURCE_FILES]
 
+    total_source_bytes = 0
     for path in python_files:
-        files_scanned += 1
         relative = str(path.relative_to(root))
         try:
-            source = path.read_text(encoding="utf-8", errors="ignore")
+            source_bytes = path.stat().st_size
+        except OSError as exc:
+            warnings.append(f"{relative}: {type(exc).__name__}: {exc}")
+            continue
+        if source_bytes > MAX_SOURCE_BYTES:
+            warnings.append(
+                f"{relative}: source size {source_bytes} exceeds {MAX_SOURCE_BYTES} bytes"
+            )
+            continue
+        if total_source_bytes + source_bytes > MAX_TOTAL_SOURCE_BYTES:
+            warnings.append(
+                f"total source size exceeds {MAX_TOTAL_SOURCE_BYTES} bytes; scan truncated"
+            )
+            break
+        total_source_bytes += source_bytes
+        files_scanned += 1
+        try:
+            with tokenize.open(path) as handle:
+                source = handle.read()
             tree = ast.parse(source, filename=relative)
-        except (OSError, SyntaxError) as exc:
+        except (OSError, SyntaxError, UnicodeError) as exc:
             warnings.append(f"{relative}: {type(exc).__name__}: {exc}")
             continue
 

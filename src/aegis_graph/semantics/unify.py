@@ -8,20 +8,23 @@ them to a stable storage/projection symbol.  No trading vocabulary is embedded h
 from __future__ import annotations
 
 import ast
-from collections import defaultdict
-from dataclasses import replace
 import hashlib
 import re
+from collections import defaultdict
 
-from aegis_graph.discovery.models import CandidateFormula, CodeAnchor, DiscoveryReport
+from aegis_graph.discovery.models import (
+    CandidateFormula,
+    CandidateFunction,
+    CodeAnchor,
+    DiscoveryReport,
+)
 from aegis_graph.semantics.models import (
     SemanticMember,
+    UnificationReport,
     UnifiedConcept,
     UnifiedFormula,
     UnifiedRelationship,
-    UnificationReport,
 )
-
 
 _GENERIC_TOKENS = {
     "account",
@@ -53,7 +56,7 @@ _NORMALIZING_WRAPPERS = {
 
 def _stable_id(prefix: str, *parts: object) -> str:
     raw = "\x1f".join(str(part) for part in parts)
-    return f"{prefix}.{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+    return f"{prefix}.{hashlib.sha1(raw.encode('utf-8'), usedforsecurity=False).hexdigest()[:16]}"
 
 
 def _scope(anchor: CodeAnchor) -> str:
@@ -62,7 +65,7 @@ def _scope(anchor: CodeAnchor) -> str:
 
 
 def _is_stable_storage(symbol: str) -> bool:
-    return symbol.startswith('state["') or symbol.startswith("self.")
+    return symbol.startswith(('state["', "self."))
 
 
 def _member_key(symbol: str, anchor: CodeAnchor) -> str:
@@ -186,11 +189,14 @@ def _display_name(members: list[SemanticMember]) -> str:
     # lexical symbol.  This is only a display hint, not an accepted business name.
     storage = [m.symbol for m in members if _is_stable_storage(m.symbol)]
     if storage:
-        return sorted(storage, key=lambda value: (len(value), value))[0]
+        return min(storage, key=lambda value: (len(value), value))
     returned = [m.symbol for m in members if m.symbol.startswith('return["')]
     if returned:
-        return sorted(returned, key=lambda value: (len(value), value))[0]
-    return sorted((m.symbol for m in members), key=lambda value: (-len(_tokens(value)), len(value), value))[0]
+        return min(returned, key=lambda value: (len(value), value))
+    return min(
+        (m.symbol for m in members),
+        key=lambda value: (-len(_tokens(value)), len(value), value),
+    )
 
 
 def _direct_argument(expression: str, symbols: tuple[str, ...]) -> bool:
@@ -319,57 +325,74 @@ def unify_discovery(report: DiscoveryReport) -> UnificationReport:
             key_to_concept[member.key] = concept_id
 
     unified_formulas: list[UnifiedFormula] = []
-    for formula, output_key, input_keys, alias_kind, alias_confidence in formula_occurrences:
-        output_concept = key_to_concept[output_key]
-        input_concepts = tuple(dict.fromkeys(key_to_concept[key] for key in input_keys))
+    for (
+        candidate_formula,
+        occurrence_output_key,
+        occurrence_input_keys,
+        occurrence_alias_kind,
+        occurrence_alias_confidence,
+    ) in formula_occurrences:
+        output_concept = key_to_concept[occurrence_output_key]
+        input_concepts = tuple(
+            dict.fromkeys(key_to_concept[member_key] for member_key in occurrence_input_keys)
+        )
         is_alias = bool(
-            alias_kind
+            occurrence_alias_kind
             and len(input_concepts) == 1
             and input_concepts[0] == output_concept
         )
         unified_formulas.append(
             UnifiedFormula(
-                id=_stable_id("semantic_formula", formula.id, output_concept, input_concepts),
+                id=_stable_id(
+                    "semantic_formula", candidate_formula.id, output_concept, input_concepts
+                ),
                 output_concept_id=output_concept,
-                output_symbol=formula.output_symbol,
-                input_symbols=formula.input_symbols,
+                output_symbol=candidate_formula.output_symbol,
+                input_symbols=candidate_formula.input_symbols,
                 input_concept_ids=input_concepts,
-                expression=formula.expression,
-                context=formula.anchor.context,
-                anchor=formula.anchor,
-                source_formula_id=formula.id,
+                expression=candidate_formula.expression,
+                context=candidate_formula.anchor.context,
+                anchor=candidate_formula.anchor,
+                source_formula_id=candidate_formula.id,
                 is_alias_projection=is_alias,
-                confidence=max(formula.confidence, alias_confidence if is_alias else 0.0),
+                confidence=max(
+                    candidate_formula.confidence,
+                    occurrence_alias_confidence if is_alias else 0.0,
+                ),
             )
         )
 
-    rel_groups: dict[tuple[str, str, str, tuple[str, ...]], list[UnifiedFormula]] = defaultdict(list)
-    for formula in unified_formulas:
-        for input_concept in formula.input_concept_ids:
-            if input_concept == formula.output_concept_id:
+    rel_groups: dict[
+        tuple[str, str, str, tuple[str, ...]], list[UnifiedFormula]
+    ] = defaultdict(list)
+    for unified_formula in unified_formulas:
+        for input_concept in unified_formula.input_concept_ids:
+            if input_concept == unified_formula.output_concept_id:
                 continue
-            key = (
-                formula.output_concept_id,
+            relationship_key = (
+                unified_formula.output_concept_id,
                 input_concept,
                 "derived_from",
-                formula.context,
+                unified_formula.context,
             )
-            rel_groups[key].append(formula)
+            rel_groups[relationship_key].append(unified_formula)
 
     # Interprocedural parameter flow is represented as a relationship rather than a
-    # union.  Generic helpers may receive semantically different values at different
+    # union. Generic helpers may receive semantically different values at different
     # call sites; merging them would collapse unrelated business concepts.
-    functions_by_name: dict[str, list] = defaultdict(list)
+    functions_by_name: dict[str, list[CandidateFunction]] = defaultdict(list)
     for function in report.functions:
         functions_by_name[function.name].append(function)
-    call_relations: list[tuple[str, str, tuple[str, ...], tuple[CodeAnchor, ...], float]] = []
+    call_relations: list[
+        tuple[str, str, tuple[str, ...], tuple[CodeAnchor, ...], float]
+    ] = []
     for call in report.calls:
         definitions = functions_by_name.get(call.callee, ())
         if len(definitions) != 1:
             continue
         function = definitions[0]
         for index, (expression, symbols) in enumerate(
-            zip(call.argument_expressions, call.argument_symbols)
+            zip(call.argument_expressions, call.argument_symbols, strict=True)
         ):
             if index >= len(function.parameters) or not _direct_argument(expression, symbols):
                 continue
@@ -379,39 +402,65 @@ def unify_discovery(report: DiscoveryReport) -> UnificationReport:
             argument_key = _member_key(argument_symbol, call.anchor)
             if parameter_key not in key_to_concept or argument_key not in key_to_concept:
                 continue
-            source = key_to_concept[parameter_key]
-            target = key_to_concept[argument_key]
-            if source == target:
+            call_source = key_to_concept[parameter_key]
+            call_target = key_to_concept[argument_key]
+            if call_source == call_target:
                 continue
             call_relations.append(
-                (source, target, call.anchor.context, (call.anchor, function.anchor), 0.92)
+                (
+                    call_source,
+                    call_target,
+                    call.anchor.context,
+                    (call.anchor, function.anchor),
+                    0.92,
+                )
             )
 
     relationships: list[UnifiedRelationship] = []
-    for key, rows in sorted(rel_groups.items(), key=lambda item: item[0]):
-        source, target, rel_type, context = key
-        anchors = tuple(dict.fromkeys(row.anchor for row in rows))
+    for relationship_key, rows in sorted(rel_groups.items(), key=lambda item: item[0]):
+        relation_source, relation_target, relation_type, relation_context = relationship_key
+        relation_anchors = tuple(dict.fromkeys(row.anchor for row in rows))
         relationships.append(
             UnifiedRelationship(
-                id=_stable_id("semantic_relationship", source, target, rel_type, context),
-                source_concept_id=source,
-                target_concept_id=target,
-                relationship_type=rel_type,
-                context=context,
-                anchors=anchors,
+                id=_stable_id(
+                    "semantic_relationship",
+                    relation_source,
+                    relation_target,
+                    relation_type,
+                    relation_context,
+                ),
+                source_concept_id=relation_source,
+                target_concept_id=relation_target,
+                relationship_type=relation_type,
+                context=relation_context,
+                anchors=relation_anchors,
                 confidence=max(row.confidence for row in rows),
             )
         )
-    for source, target, context, anchors, confidence in call_relations:
+    for (
+        call_source,
+        call_target,
+        call_context,
+        call_anchors,
+        call_confidence,
+    ) in call_relations:
         relationships.append(
             UnifiedRelationship(
-                id=_stable_id("semantic_relationship", source, target, "parameter_from", context, anchors[0].path, anchors[0].line),
-                source_concept_id=source,
-                target_concept_id=target,
+                id=_stable_id(
+                    "semantic_relationship",
+                    call_source,
+                    call_target,
+                    "parameter_from",
+                    call_context,
+                    call_anchors[0].path,
+                    call_anchors[0].line,
+                ),
+                source_concept_id=call_source,
+                target_concept_id=call_target,
                 relationship_type="parameter_from",
-                context=context,
-                anchors=anchors,
-                confidence=confidence,
+                context=call_context,
+                anchors=call_anchors,
+                confidence=call_confidence,
             )
         )
 

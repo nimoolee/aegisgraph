@@ -1,10 +1,10 @@
 """Product-generic semantic discovery primitives."""
 
 from aegis_graph.discovery.models import (
-    CandidateConcept,
     CandidateCall,
-    CandidateFunction,
+    CandidateConcept,
     CandidateFormula,
+    CandidateFunction,
     CandidateRelationship,
     CodeAnchor,
     DiscoveryReport,
@@ -13,10 +13,10 @@ from aegis_graph.discovery.models import (
 from aegis_graph.discovery.python_ast import discover_python
 
 __all__ = [
-    "CandidateConcept",
     "CandidateCall",
-    "CandidateFunction",
+    "CandidateConcept",
     "CandidateFormula",
+    "CandidateFunction",
     "CandidateRelationship",
     "CodeAnchor",
     "DiscoveryReport",

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from aegis_graph.discovery.models import CodeAnchor, SemanticStatus
+from aegis_graph.immutability import freeze_mapping, freeze_tuple
 
 if TYPE_CHECKING:
     from aegis_graph.impact.analyzer import ImpactResult
@@ -72,9 +74,21 @@ class UnificationReport:
     concepts: tuple[UnifiedConcept, ...]
     formulas: tuple[UnifiedFormula, ...]
     relationships: tuple[UnifiedRelationship, ...]
-    symbol_to_concept: dict[str, str]
+    symbol_to_concept: Mapping[str, str]
     warnings: tuple[str, ...] = ()
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "symbol_to_concept",
+            cast(Mapping[str, str], freeze_mapping(self.symbol_to_concept)),
+        )
+        object.__setattr__(
+            self,
+            "metadata",
+            cast(Mapping[str, str], freeze_mapping(self.metadata)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +109,14 @@ class SemanticConflict:
 class ConflictReport:
     target_root: str
     conflicts: tuple[SemanticConflict, ...]
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "metadata",
+            cast(Mapping[str, str], freeze_mapping(self.metadata)),
+        )
 
 
 class ManagedRuleKind(str, Enum):
@@ -123,6 +144,12 @@ class SemanticRuleSpec:
     applies_when: str | None = None
     context_ids: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "inputs", freeze_tuple(self.inputs))
+        object.__setattr__(self, "outputs", freeze_tuple(self.outputs))
+        object.__setattr__(self, "facts", freeze_tuple(self.facts))
+        object.__setattr__(self, "context_ids", freeze_tuple(self.context_ids))
+
 
 @dataclass(frozen=True, slots=True)
 class SemanticRuleVersion:
@@ -134,6 +161,9 @@ class SemanticRuleVersion:
     proposed_by: str
     evidence_ids: tuple[str, ...] = ()
     commit_sha: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_ids", freeze_tuple(self.evidence_ids))
 
     @property
     def version_id(self) -> str:
@@ -151,6 +181,9 @@ class RuleApproval:
     reason: str
     evidence_ids: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_ids", freeze_tuple(self.evidence_ids))
+
 
 @dataclass(frozen=True, slots=True)
 class SemanticRuleDiff:
@@ -158,6 +191,9 @@ class SemanticRuleDiff:
     from_version: int | None
     to_version: int
     changed_fields: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "changed_fields", freeze_tuple(self.changed_fields))
 
     @property
     def has_semantic_change(self) -> bool:
@@ -177,3 +213,11 @@ class RuleChangeProof:
     verdict: RuleChangeVerdict
     reasons: tuple[str, ...]
     approval: RuleApproval | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "required_verification_ids",
+            freeze_tuple(self.required_verification_ids),
+        )
+        object.__setattr__(self, "reasons", freeze_tuple(self.reasons))

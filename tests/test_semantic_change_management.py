@@ -1,6 +1,13 @@
 import pytest
 
-from aegis_graph.core.models import FactNode, Invariant, Metadata, Relationship, RelationshipType, Rule
+from aegis_graph.core.models import (
+    FactNode,
+    Invariant,
+    Metadata,
+    Relationship,
+    RelationshipType,
+    Rule,
+)
 from aegis_graph.graph.store import GraphIntegrityError, SoftwareGraph
 from aegis_graph.semantics import (
     ManagedRuleKind,
@@ -200,6 +207,17 @@ def test_candidate_requires_traceable_proposer() -> None:
     manager = SemanticChangeManager(build_graph())
     with pytest.raises(SemanticChangeError, match="proposer"):
         manager.propose(cash_rule("physical - safety - trading"), proposed_by="")
+    with pytest.raises(SemanticChangeError, match="proposer"):
+        manager.propose(
+            cash_rule("physical - safety - trading"),
+            proposed_by=None,  # type: ignore[arg-type]
+        )
+    with pytest.raises(SemanticChangeError, match="evidence ids"):
+        manager.propose(
+            cash_rule("physical - safety - trading"),
+            proposed_by="discovery",
+            evidence_ids=("evidence:a", " "),
+        )
 
 
 def test_approval_must_match_exact_version_and_be_explicit() -> None:
@@ -211,10 +229,27 @@ def test_approval_must_match_exact_version_and_be_explicit() -> None:
             candidate,
             RuleApproval("a", candidate.semantic_id, 99, "owner", "reason"),
         )
-    with pytest.raises(SemanticChangeError, match="requires id, approver, and reason"):
+    with pytest.raises(SemanticChangeError, match="approval id is required"):
         manager.accept(
             candidate,
             RuleApproval("", candidate.semantic_id, candidate.version, "owner", "reason"),
+        )
+    with pytest.raises(SemanticChangeError, match="positive integer"):
+        manager.accept(
+            candidate,
+            RuleApproval("a", candidate.semantic_id, True, "owner", "reason"),  # type: ignore[arg-type]
+        )
+    with pytest.raises(SemanticChangeError, match="evidence ids"):
+        manager.accept(
+            candidate,
+            RuleApproval(
+                "a",
+                candidate.semantic_id,
+                candidate.version,
+                "owner",
+                "reason",
+                evidence_ids=(" ",),
+            ),
         )
 
 
@@ -249,3 +284,72 @@ def test_invariant_change_is_versioned_and_self_selected_for_reverification() ->
 
     manager.accept(candidate, approval(candidate))
     assert graph.invariants["inv.cash.partition"].metadata.version == "1"
+
+
+def test_semantic_id_cannot_change_kind() -> None:
+    graph = build_graph()
+    manager = SemanticChangeManager(graph)
+
+    with pytest.raises(SemanticChangeError, match="already an invariant"):
+        manager.propose(
+            SemanticRuleSpec(
+                semantic_id="inv.orderable.nonnegative",
+                kind=ManagedRuleKind.RULE,
+                name="Wrong kind",
+                inputs=("cash.trading",),
+                outputs=("orderable",),
+            ),
+            proposed_by="product",
+        )
+
+
+def test_bootstrap_rejects_corrupt_existing_semantic_version() -> None:
+    graph = build_graph()
+    graph.add_rule(
+        Rule(
+            id="rule.bad.version",
+            name="Bad version",
+            inputs=("cash.physical",),
+            outputs=("cash.trading",),
+            metadata=Metadata(version="banana"),
+        )
+    )
+
+    with pytest.raises(SemanticChangeError, match="invalid version"):
+        SemanticChangeManager(graph)
+
+
+def test_semantic_rule_spec_detaches_from_caller_lists() -> None:
+    inputs = ["cash.physical"]
+    outputs = ["cash.trading"]
+    spec = SemanticRuleSpec(
+        semantic_id="rule.detached",
+        kind=ManagedRuleKind.RULE,
+        name="Detached",
+        inputs=inputs,  # type: ignore[arg-type]
+        outputs=outputs,  # type: ignore[arg-type]
+    )
+    manager = SemanticChangeManager(build_graph())
+    candidate = manager.propose(
+        spec,
+        proposed_by="product",
+        evidence_ids=("evidence:one",),
+    )
+
+    inputs.append("cash.safety")
+    outputs.append("cash.gap")
+    assert spec.inputs == ("cash.physical",)
+    assert spec.outputs == ("cash.trading",)
+    assert candidate.evidence_ids == ("evidence:one",)
+
+    approval_evidence = ["evidence:approval"]
+    approval_value = RuleApproval(
+        "approval:detached",
+        candidate.semantic_id,
+        candidate.version,
+        "owner",
+        "reviewed",
+        evidence_ids=approval_evidence,  # type: ignore[arg-type]
+    )
+    approval_evidence.append("evidence:forged")
+    assert approval_value.evidence_ids == ("evidence:approval",)

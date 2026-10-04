@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from aegis_graph.immutability import freeze_tuple
 from aegis_graph.impact.analyzer import ImpactResult
 from aegis_graph.invariants.executor import InvariantCheck
 
 
 class ProofVerdict(str, Enum):
-    PASS = "pass"
+    # This is a proof verdict string, never credential material.
+    PASS = "pass"  # nosec B105
     WARN = "warn"
     FAIL = "fail"
     UNKNOWN = "unknown"
@@ -26,6 +28,17 @@ class RepairDirective:
     must_not_change: tuple[str, ...] = ()
     required_verification: tuple[str, ...] = ()
     required_evidence: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "must_change", freeze_tuple(self.must_change))
+        object.__setattr__(self, "must_preserve", freeze_tuple(self.must_preserve))
+        object.__setattr__(self, "must_not_change", freeze_tuple(self.must_not_change))
+        object.__setattr__(
+            self,
+            "required_verification",
+            freeze_tuple(self.required_verification),
+        )
+        object.__setattr__(self, "required_evidence", freeze_tuple(self.required_evidence))
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,13 +56,29 @@ class RepairContract:
     required_verification: tuple[str, ...]
     required_evidence: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "violated_invariant_ids",
+            freeze_tuple(self.violated_invariant_ids),
+        )
+        object.__setattr__(self, "must_change", freeze_tuple(self.must_change))
+        object.__setattr__(self, "must_preserve", freeze_tuple(self.must_preserve))
+        object.__setattr__(self, "must_not_change", freeze_tuple(self.must_not_change))
+        object.__setattr__(
+            self,
+            "required_verification",
+            freeze_tuple(self.required_verification),
+        )
+        object.__setattr__(self, "required_evidence", freeze_tuple(self.required_evidence))
+
 
 @dataclass(frozen=True, slots=True)
 class ChangeProof:
     """A structured proof envelope.
 
-    v0.1 M1 only proves impact selection. Until verification evidence is executed,
-    the verdict must remain UNKNOWN by design.
+    v1.0 carries semantic impact plus executable invariant evidence. If evidence is
+    incomplete, callers must preserve UNKNOWN rather than manufacture PASS.
     """
 
     id: str
@@ -60,3 +89,7 @@ class ChangeProof:
     verdict: ProofVerdict
     reasons: tuple[str, ...]
     repair_contract: RepairContract | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "invariant_checks", freeze_tuple(self.invariant_checks))
+        object.__setattr__(self, "reasons", freeze_tuple(self.reasons))

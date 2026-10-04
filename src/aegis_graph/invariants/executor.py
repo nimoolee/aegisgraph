@@ -1,4 +1,4 @@
-"""Machine-executable invariant verification for AegisGraph v0.1."""
+"""Machine-executable invariant verification for AegisGraph v1.0."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from aegis_graph.graph.store import SoftwareGraph
 
 
 class InvariantStatus(str, Enum):
-    PASS = "pass"
+    # This is a verifier verdict string, never credential material.
+    PASS = "pass"  # nosec B105
     FAIL = "fail"
     UNKNOWN = "unknown"
 
@@ -21,6 +22,14 @@ class InvariantCheck:
     invariant_id: str
     status: InvariantStatus
     message: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.invariant_id, str) or not self.invariant_id.strip():
+            raise ValueError("invariant check id must be a non-empty string")
+        if not isinstance(self.status, InvariantStatus):
+            raise TypeError("invariant check status must be InvariantStatus")
+        if not isinstance(self.message, str) or not self.message.strip():
+            raise ValueError("invariant check message must be a non-empty string")
 
 
 ValidatorReturn = bool | tuple[bool, str]
@@ -79,7 +88,23 @@ class InvariantExecutor:
             evidence = {fact_id: values[fact_id] for fact_id in invariant.facts}
             try:
                 outcome = validator(evidence)
-            except Exception as exc:  # fail closed: verifier bugs are not PASS
+                if isinstance(outcome, bool):
+                    passed = outcome
+                    message = "invariant satisfied" if passed else "invariant violated"
+                elif (
+                    isinstance(outcome, tuple)
+                    and len(outcome) == 2
+                    and isinstance(outcome[0], bool)
+                    and isinstance(outcome[1], str)
+                    and bool(outcome[1].strip())
+                ):
+                    passed, message = outcome
+                else:
+                    raise TypeError(
+                        "validator must return bool or exactly tuple[bool, str]"
+                    )
+            except Exception as exc:
+                # Fail closed: validator bugs and contract violations are UNKNOWN, never PASS.
                 checks.append(
                     InvariantCheck(
                         invariant_id=invariant_id,
@@ -88,12 +113,6 @@ class InvariantExecutor:
                     )
                 )
                 continue
-
-            if isinstance(outcome, tuple):
-                passed, message = outcome
-            else:
-                passed = outcome
-                message = "invariant satisfied" if passed else "invariant violated"
 
             checks.append(
                 InvariantCheck(

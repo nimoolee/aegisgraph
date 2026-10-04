@@ -9,8 +9,8 @@ from aegis_graph.core.models import Change
 from aegis_graph.graph.store import SoftwareGraph
 from aegis_graph.impact.analyzer import ImpactAnalyzer
 from aegis_graph.invariants.executor import InvariantExecutor, InvariantValidator
-from aegis_graph.proof.builder import build_impact_proof
 from aegis_graph.policy import READ_ONLY_TARGET_POLICY, ProductBoundary
+from aegis_graph.proof.builder import build_impact_proof
 from aegis_graph.proof.models import ChangeProof, RepairDirective
 
 
