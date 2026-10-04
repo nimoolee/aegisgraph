@@ -1,12 +1,14 @@
 from pathlib import Path
 
+import pytest
+
 from aegis_graph.discovery import CodeAnchor, discover_python
 from aegis_graph.semantics import detect_conflicts, unify_discovery
 from aegis_graph.semantics.models import (
     SemanticMember,
+    UnificationReport,
     UnifiedConcept,
     UnifiedFormula,
-    UnificationReport,
 )
 
 
@@ -157,6 +159,11 @@ def test_conflict_detector_requires_prior_cross_scope_semantic_unification() -> 
         symbol_to_concept={},
     )
     conflicts = detect_conflicts(report).conflicts
+    with pytest.raises(TypeError):
+        report.symbol_to_concept["forged"] = "semantic.metric"  # type: ignore[index]
+    conflict_report = detect_conflicts(report)
+    with pytest.raises(TypeError):
+        conflict_report.metadata["candidate_conflicts"] = "999"  # type: ignore[index]
     assert len(conflicts) == 1
     assert set(conflicts[0].expressions) == {"left + 1", "right * 2"}
 

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from aegis_graph.semantics.models import ConflictReport, UnificationReport
+from aegis_graph.semantics.models import (
+    ConflictReport,
+    UnificationReport,
+    UnifiedFormula,
+)
 
 
 def render_unification(
@@ -21,7 +25,7 @@ def render_unification(
             concepts.append(concept)
     concepts.sort(key=lambda item: (-len(item.members), -item.confidence, item.display_name))
 
-    formulas_by_output: dict[str, list] = {}
+    formulas_by_output: dict[str, list[UnifiedFormula]] = {}
     for formula in report.formulas:
         formulas_by_output.setdefault(formula.output_concept_id, []).append(formula)
 
@@ -74,7 +78,9 @@ def render_conflicts(report: ConflictReport, unification: UnificationReport) -> 
         lines.append(f"\nCONFLICT {conflict.id}")
         lines.append(f"Concept: {concept.display_name} ({concept.id})")
         lines.append(f"Context: {context}")
-        for expression, anchor in zip(conflict.expressions, conflict.anchors):
+        for expression, anchor in zip(
+            conflict.expressions, conflict.anchors, strict=True
+        ):
             lines.append(
                 f"  - {expression} <- {anchor.path}:{anchor.line} "
                 f"function={anchor.function or '<module>'}"

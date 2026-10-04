@@ -7,8 +7,11 @@ used by the verifier live.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+
+from aegis_graph.immutability import freeze_mapping, freeze_tuple
 
 
 class SemanticStatus(str, Enum):
@@ -34,6 +37,9 @@ class CodeAnchor:
     class_name: str | None = None
     context: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "context", freeze_tuple(self.context))
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateConcept:
@@ -44,6 +50,9 @@ class CandidateConcept:
     status: SemanticStatus = SemanticStatus.DISCOVERED
     confidence: float = 0.5
     anchors: tuple[CodeAnchor, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "anchors", freeze_tuple(self.anchors))
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +66,9 @@ class CandidateFormula:
     anchor: CodeAnchor
     status: SemanticStatus = SemanticStatus.CANDIDATE
     confidence: float = 0.7
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "input_symbols", freeze_tuple(self.input_symbols))
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +93,9 @@ class CandidateFunction:
     parameters: tuple[str, ...]
     anchor: CodeAnchor
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "parameters", freeze_tuple(self.parameters))
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateCall:
@@ -91,6 +106,10 @@ class CandidateCall:
     argument_expressions: tuple[str, ...]
     argument_symbols: tuple[tuple[str, ...], ...]
     anchor: CodeAnchor
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "argument_expressions", freeze_tuple(self.argument_expressions))
+        object.__setattr__(self, "argument_symbols", freeze_tuple(self.argument_symbols))
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,4 +125,13 @@ class DiscoveryReport:
     functions: tuple[CandidateFunction, ...] = ()
     calls: tuple[CandidateCall, ...] = ()
     warnings: tuple[str, ...] = ()
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "concepts", freeze_tuple(self.concepts))
+        object.__setattr__(self, "formulas", freeze_tuple(self.formulas))
+        object.__setattr__(self, "relationships", freeze_tuple(self.relationships))
+        object.__setattr__(self, "functions", freeze_tuple(self.functions))
+        object.__setattr__(self, "calls", freeze_tuple(self.calls))
+        object.__setattr__(self, "warnings", freeze_tuple(self.warnings))
+        object.__setattr__(self, "metadata", freeze_mapping(self.metadata))

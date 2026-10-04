@@ -5,9 +5,13 @@ The core deliberately contains no trading- or platform-specific semantics.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from aegis_graph.immutability import freeze_mapping, freeze_tuple
 
 
 class Criticality(str, Enum):
@@ -61,6 +65,18 @@ class Metadata:
     valid_to: str | None = None
     commit_sha: str | None = None
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.version, str) or not self.version.strip():
+            raise ValueError("metadata version must be a non-empty string")
+        if not isinstance(self.provenance, ConfidenceSource):
+            raise TypeError("metadata provenance must be ConfidenceSource")
+        if not isinstance(self.criticality, Criticality):
+            raise TypeError("metadata criticality must be Criticality")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)):
+            raise TypeError("metadata confidence must be a real number")
+        if not math.isfinite(float(self.confidence)) or not 0 <= self.confidence <= 1:
+            raise ValueError("metadata confidence must be finite and between 0 and 1")
+
 
 @dataclass(frozen=True, slots=True)
 class FactNode:
@@ -85,8 +101,11 @@ class Relationship:
 class Context:
     id: str
     kind: str
-    attributes: dict[str, Any] = field(default_factory=dict)
+    attributes: Mapping[str, Any] = field(default_factory=dict)
     metadata: Metadata = field(default_factory=Metadata)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attributes", freeze_mapping(self.attributes))
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +119,11 @@ class Rule:
     context_ids: tuple[str, ...] = ()
     metadata: Metadata = field(default_factory=Metadata)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "inputs", freeze_tuple(self.inputs))
+        object.__setattr__(self, "outputs", freeze_tuple(self.outputs))
+        object.__setattr__(self, "context_ids", freeze_tuple(self.context_ids))
+
 
 @dataclass(frozen=True, slots=True)
 class Invariant:
@@ -110,6 +134,10 @@ class Invariant:
     applies_when: str | None = None
     context_ids: tuple[str, ...] = ()
     metadata: Metadata = field(default_factory=Metadata)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "facts", freeze_tuple(self.facts))
+        object.__setattr__(self, "context_ids", freeze_tuple(self.context_ids))
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,4 +151,35 @@ class Change:
     changed_invariant_ids: tuple[str, ...] = ()
     changed_context_ids: tuple[str, ...] = ()
     commit_sha: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ValueError("change id must be a non-empty string")
+        if not isinstance(self.summary, str) or not self.summary.strip():
+            raise ValueError("change summary must be a non-empty string")
+        if not isinstance(self.type, ChangeType):
+            raise TypeError("change type must be ChangeType")
+        object.__setattr__(self, "changed_fact_ids", freeze_tuple(self.changed_fact_ids))
+        object.__setattr__(self, "changed_rule_ids", freeze_tuple(self.changed_rule_ids))
+        object.__setattr__(
+            self,
+            "changed_relationship_ids",
+            freeze_tuple(self.changed_relationship_ids),
+        )
+        object.__setattr__(
+            self,
+            "changed_invariant_ids",
+            freeze_tuple(self.changed_invariant_ids),
+        )
+        object.__setattr__(self, "changed_context_ids", freeze_tuple(self.changed_context_ids))
+        for label, values in (
+            ("fact", self.changed_fact_ids),
+            ("rule", self.changed_rule_ids),
+            ("relationship", self.changed_relationship_ids),
+            ("invariant", self.changed_invariant_ids),
+            ("context", self.changed_context_ids),
+        ):
+            if any(not isinstance(value, str) or not value.strip() for value in values):
+                raise ValueError(f"changed {label} ids must be non-empty strings")
+        object.__setattr__(self, "metadata", freeze_mapping(self.metadata))

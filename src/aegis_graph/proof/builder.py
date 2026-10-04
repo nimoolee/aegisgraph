@@ -7,7 +7,12 @@ from collections.abc import Mapping
 from aegis_graph.core.models import Change
 from aegis_graph.impact.analyzer import ImpactResult
 from aegis_graph.invariants.executor import InvariantCheck, InvariantStatus
-from aegis_graph.proof.models import ChangeProof, ProofVerdict, RepairContract, RepairDirective
+from aegis_graph.proof.models import (
+    ChangeProof,
+    ProofVerdict,
+    RepairContract,
+    RepairDirective,
+)
 
 
 def _dedupe(values: list[str]) -> tuple[str, ...]:
@@ -65,14 +70,37 @@ def build_impact_proof(
 ) -> ChangeProof:
     """Create a proof envelope from impact and executable verification evidence."""
 
-    statuses = {check.status for check in invariant_checks}
+    expected_ids = set(impact.affected_invariant_ids)
+    actual_ids = [check.invariant_id for check in invariant_checks]
+    actual_id_set = set(actual_ids)
+    duplicate_ids = sorted(
+        invariant_id for invariant_id in actual_id_set if actual_ids.count(invariant_id) > 1
+    )
+    missing_ids = sorted(expected_ids - actual_id_set)
+    unexpected_ids = sorted(actual_id_set - expected_ids)
+    expected_checks = tuple(
+        check for check in invariant_checks if check.invariant_id in expected_ids
+    )
+    statuses = {check.status for check in expected_checks}
+    reasons: tuple[str, ...]
+
     if InvariantStatus.FAIL in statuses:
         verdict = ProofVerdict.FAIL
         reasons = ("one or more affected invariants failed",)
+    elif missing_ids or unexpected_ids or duplicate_ids:
+        verdict = ProofVerdict.UNKNOWN
+        detail: list[str] = ["invariant evidence set does not match semantic impact"]
+        if missing_ids:
+            detail.append(f"missing checks: {', '.join(missing_ids)}")
+        if unexpected_ids:
+            detail.append(f"unexpected checks: {', '.join(unexpected_ids)}")
+        if duplicate_ids:
+            detail.append(f"duplicate checks: {', '.join(duplicate_ids)}")
+        reasons = tuple(detail)
     elif InvariantStatus.UNKNOWN in statuses:
         verdict = ProofVerdict.UNKNOWN
         reasons = ("one or more affected invariants lack conclusive evidence",)
-    elif impact.affected_invariant_ids and invariant_checks:
+    elif expected_ids and expected_checks:
         verdict = ProofVerdict.PASS
         reasons = ("all affected executable invariants passed",)
     else:
@@ -83,7 +111,11 @@ def build_impact_proof(
         )
 
     failed_invariant_ids = tuple(
-        sorted(check.invariant_id for check in invariant_checks if check.status is InvariantStatus.FAIL)
+        sorted(
+            check.invariant_id
+            for check in expected_checks
+            if check.status is InvariantStatus.FAIL
+        )
     )
     repair_contract = build_repair_contract(change, failed_invariant_ids, repair_directives)
 

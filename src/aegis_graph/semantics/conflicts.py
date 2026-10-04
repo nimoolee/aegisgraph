@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import hashlib
+from collections import defaultdict
 
-from aegis_graph.semantics.models import ConflictReport, SemanticConflict, UnificationReport
+from aegis_graph.semantics.models import (
+    ConflictReport,
+    SemanticConflict,
+    UnificationReport,
+    UnifiedFormula,
+)
 
 
 def _stable_id(prefix: str, *parts: object) -> str:
     raw = "\x1f".join(str(part) for part in parts)
-    return f"{prefix}.{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+    return f"{prefix}.{hashlib.sha1(raw.encode('utf-8'), usedforsecurity=False).hexdigest()[:16]}"
 
 
 def _normalized_expression(expression: str) -> str:
@@ -29,12 +34,12 @@ def detect_conflicts(report: UnificationReport) -> ConflictReport:
     """Find only same-concept/same-context incompatible formula candidates.
 
     Mutable state writes (persisted state keys and class-owned ``self`` attributes) are
-    excluded in v0.1 because initialization/refresh/debit/credit transitions are not
+    excluded in v1.0 because initialization/refresh/debit/credit transitions are not
     competing definitions. Alias/projection formulas are also excluded because they
     describe representation, not a business rule.
     """
 
-    groups: dict[tuple[str, tuple[str, ...]], list] = defaultdict(list)
+    groups: dict[tuple[str, tuple[str, ...]], list[UnifiedFormula]] = defaultdict(list)
     for formula in report.formulas:
         if formula.is_alias_projection:
             continue
@@ -46,7 +51,7 @@ def detect_conflicts(report: UnificationReport) -> ConflictReport:
 
     conflicts: list[SemanticConflict] = []
     for (concept_id, context), rows in sorted(groups.items(), key=lambda item: item[0]):
-        by_expression: dict[str, list] = defaultdict(list)
+        by_expression: dict[str, list[UnifiedFormula]] = defaultdict(list)
         for row in rows:
             by_expression[_normalized_expression(row.expression)].append(row)
         if len(by_expression) <= 1:

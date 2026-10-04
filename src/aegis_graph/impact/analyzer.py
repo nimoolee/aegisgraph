@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import cast
 
 from aegis_graph.core.models import Change, Relationship, RelationshipType
 from aegis_graph.graph.store import SoftwareGraph
+from aegis_graph.immutability import freeze_mapping, freeze_tuple
 
-MAX_PATH_DEPTH = 12
 MAX_PATHS_PER_FACT = 8
 
 
@@ -41,6 +43,10 @@ class ImpactPath:
     fact_ids: tuple[str, ...]
     via: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "fact_ids", freeze_tuple(self.fact_ids))
+        object.__setattr__(self, "via", freeze_tuple(self.via))
+
 
 @dataclass(frozen=True, slots=True)
 class ImpactResult:
@@ -49,8 +55,31 @@ class ImpactResult:
     affected_fact_ids: tuple[str, ...]
     affected_rule_ids: tuple[str, ...]
     affected_invariant_ids: tuple[str, ...]
-    paths: dict[str, ImpactPath] = field(default_factory=dict)
-    alternate_paths: dict[str, tuple[ImpactPath, ...]] = field(default_factory=dict)
+    paths: Mapping[str, ImpactPath] = field(default_factory=dict)
+    alternate_paths: Mapping[str, tuple[ImpactPath, ...]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "seed_fact_ids", freeze_tuple(self.seed_fact_ids))
+        object.__setattr__(self, "affected_fact_ids", freeze_tuple(self.affected_fact_ids))
+        object.__setattr__(self, "affected_rule_ids", freeze_tuple(self.affected_rule_ids))
+        object.__setattr__(
+            self,
+            "affected_invariant_ids",
+            freeze_tuple(self.affected_invariant_ids),
+        )
+        object.__setattr__(
+            self,
+            "paths",
+            cast(Mapping[str, ImpactPath], freeze_mapping(self.paths)),
+        )
+        object.__setattr__(
+            self,
+            "alternate_paths",
+            cast(
+                Mapping[str, tuple[ImpactPath, ...]],
+                freeze_mapping(self.alternate_paths),
+            ),
+        )
 
     def paths_for(self, fact_id: str) -> tuple[ImpactPath, ...]:
         primary = self.paths.get(fact_id)
@@ -65,7 +94,23 @@ class ImpactAnalyzer:
     def __init__(self, graph: SoftwareGraph) -> None:
         self.graph = graph
 
+    def _validate_change_references(self, change: Change) -> None:
+        registries = (
+            ("fact", change.changed_fact_ids, self.graph.facts),
+            ("rule", change.changed_rule_ids, self.graph.rules),
+            ("relationship", change.changed_relationship_ids, self.graph.relationships),
+            ("invariant", change.changed_invariant_ids, self.graph.invariants),
+            ("context", change.changed_context_ids, self.graph.contexts),
+        )
+        for kind, object_ids, registry in registries:
+            missing = sorted(object_id for object_id in object_ids if object_id not in registry)
+            if missing:
+                raise ValueError(
+                    f"change references unknown {kind} ids: {', '.join(missing)}"
+                )
+
     def analyze(self, change: Change) -> ImpactResult:
+        self._validate_change_references(change)
         seeds = set(change.changed_fact_ids)
 
         # A rule change changes the semantics of its outputs.
@@ -103,9 +148,9 @@ class ImpactAnalyzer:
 
         affected_invariants = set(change.changed_invariant_ids)
         for invariant in self.graph.invariants.values():
-            if affected_facts.intersection(invariant.facts):
-                affected_invariants.add(invariant.id)
-            elif changed_contexts.intersection(invariant.context_ids):
+            if affected_facts.intersection(
+                invariant.facts
+            ) or changed_contexts.intersection(invariant.context_ids):
                 affected_invariants.add(invariant.id)
 
         return ImpactResult(
@@ -128,16 +173,28 @@ class ImpactAnalyzer:
             raise ValueError(f"change references unknown fact ids: {', '.join(missing)}")
 
     def _propagate(self, seeds: set[str]) -> dict[str, list[ImpactPath]]:
+        """Traverse every reachable fact while bounding only explanation-path storage.
+
+        Reachability is semantic truth and must never be depth-truncated. Each fact is
+        expanded once, which keeps traversal finite even for cyclic graphs. Additional
+        representative paths are retained up to ``MAX_PATHS_PER_FACT`` but are not
+        required for reachability.
+        """
+
         paths: dict[str, list[ImpactPath]] = {
             seed: [ImpactPath(fact_ids=(seed,))] for seed in sorted(seeds)
         }
-        queue: deque[ImpactPath] = deque(paths[seed][0] for seed in sorted(seeds))
+        queue: deque[str] = deque(sorted(seeds))
+        queued = set(seeds)
+        expanded: set[str] = set()
 
         while queue:
-            current_path = queue.popleft()
-            changed = current_path.fact_ids[-1]
-            if len(current_path.fact_ids) >= MAX_PATH_DEPTH:
+            changed = queue.popleft()
+            queued.discard(changed)
+            if changed in expanded:
                 continue
+            expanded.add(changed)
+            current_path = paths[changed][0]
 
             candidates = self._semantic_neighbors(changed)
             for rule in sorted(self.graph.rules.values(), key=lambda item: item.id):
@@ -146,7 +203,8 @@ class ImpactAnalyzer:
                         candidates.append((output, f"rule:{rule.id}"))
 
             for next_fact, edge_label in candidates:
-                # Only simple paths: never loop through a fact already on this path.
+                # Retained explanations use simple paths, while reachability itself is
+                # guaranteed by expanding each fact exactly once.
                 if next_fact in current_path.fact_ids:
                     continue
                 candidate = ImpactPath(
@@ -154,10 +212,11 @@ class ImpactAnalyzer:
                     via=(*current_path.via, edge_label),
                 )
                 existing = paths.setdefault(next_fact, [])
-                if candidate in existing or len(existing) >= MAX_PATHS_PER_FACT:
-                    continue
-                existing.append(candidate)
-                queue.append(candidate)
+                if candidate not in existing and len(existing) < MAX_PATHS_PER_FACT:
+                    existing.append(candidate)
+                if next_fact not in expanded and next_fact not in queued:
+                    queue.append(next_fact)
+                    queued.add(next_fact)
 
         return paths
 
