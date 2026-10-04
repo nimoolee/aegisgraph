@@ -9,14 +9,67 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import warnings
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Protocol, cast
 
 MAX_AUDIT_LINE_BYTES = 1024 * 1024
+
+_AUDIT_PROCESS_LOCK = threading.Lock()
+
+
+class _WindowsLockingAPI(Protocol):
+    LK_LOCK: int
+    LK_UNLCK: int
+
+    def locking(self, fd: int, mode: int, nbytes: int) -> None: ...
+
+
+@contextmanager
+def _exclusive_audit_lock(output: Path) -> Iterator[None]:
+    """Serialize audit appends across processes without third-party dependencies."""
+
+    lock_path = output.with_name(f"{output.name}.lock")
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    descriptor = os.open(lock_path, flags, 0o600)
+    locked = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"\0")
+                os.fsync(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            windows_locking = cast(_WindowsLockingAPI, msvcrt)
+            windows_locking.locking(descriptor, windows_locking.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        locked = True
+        yield
+    finally:
+        if locked:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                windows_locking = cast(_WindowsLockingAPI, msvcrt)
+                windows_locking.locking(descriptor, windows_locking.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def default_state_dir() -> Path:
@@ -113,14 +166,17 @@ def append_invocation(record: InvocationRecord, path: str | Path | None = None) 
     flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY
-    descriptor = os.open(output, flags, 0o600)
-    try:
-        written = os.write(descriptor, payload)
-        if written != len(payload):
-            raise OSError(f"partial audit append: wrote {written} of {len(payload)} bytes")
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    with _AUDIT_PROCESS_LOCK, _exclusive_audit_lock(output):
+        descriptor = os.open(output, flags, 0o600)
+        try:
+            written = os.write(descriptor, payload)
+            if written != len(payload):
+                raise OSError(
+                    f"partial audit append: wrote {written} of {len(payload)} bytes"
+                )
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     return output
 
 

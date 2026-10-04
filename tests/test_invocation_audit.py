@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -10,6 +10,19 @@ from aegis_graph.audit import (
     new_record,
     summarize_invocations,
 )
+
+
+def _append_audit_from_process(args: tuple[str, str, int]) -> int:
+    path, target, index = args
+    append_invocation(
+        new_record(
+            mode="semantic_discovery",
+            target=target,
+            note=f"process-{index}",
+        ),
+        Path(path),
+    )
+    return index
 
 
 def test_invocation_audit_is_append_only_and_summarizable(tmp_path: Path) -> None:
@@ -68,6 +81,22 @@ def test_concurrent_audit_appends_remain_valid_json_lines(tmp_path: Path) -> Non
     records = load_invocations(path)
     assert len(records) == 40
     assert {record.note for record in records} == {f"run-{index}" for index in range(40)}
+
+
+def test_cross_process_audit_appends_remain_complete(tmp_path: Path) -> None:
+    path = tmp_path / "process-invocations.jsonl"
+    target = tmp_path / "target"
+    target.mkdir()
+    rows = [(str(path), str(target), index) for index in range(16)]
+
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        assert sorted(pool.map(_append_audit_from_process, rows)) == list(range(16))
+
+    records = load_invocations(path)
+    assert len(records) == 16
+    assert {record.note for record in records} == {
+        f"process-{index}" for index in range(16)
+    }
 
 
 def test_invalid_invocation_fields_fail_closed(tmp_path: Path) -> None:
