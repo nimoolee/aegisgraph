@@ -1,11 +1,14 @@
+from decimal import Decimal
+
+import pytest
+
 from aegis_graph.audit.invocations import InvocationRecord, summarize_invocations
 from aegis_graph.core.models import FactNode, Invariant, Rule
 from aegis_graph.graph.store import SoftwareGraph
-from aegis_graph.invariants.executor import InvariantCheck, InvariantStatus
 from aegis_graph.impact.analyzer import ImpactResult
+from aegis_graph.invariants.executor import InvariantCheck, InvariantStatus
 from aegis_graph.proof.models import ChangeProof, ProofVerdict
-from aegis_graph.ui import build_graph_payload, render_graph_html
-from decimal import Decimal
+from aegis_graph.ui import build_graph_payload, render_graph_html, write_graph_html
 from aegis_graph.ui.auto_trading_labels import AUTO_TRADING_DISPLAY_LABELS
 
 
@@ -62,6 +65,19 @@ def test_html_serializes_decimal_runtime_evidence_safely() -> None:
     assert '10.606' in html
 
 
+def test_graph_html_escapes_script_terminators_in_payload() -> None:
+    payload = {
+        "summary": {"facts": 1, "rules": 0, "invariants": 0, "contexts": 0, "relationships": 0, "verdict": "unverified", "pass": 0, "fail": 0, "unknown": 0},
+        "nodes": [{"id": "cash", "label": "</script><script>alert(1)</script>", "type": "fact", "status": "active", "impacted": False, "details": {}}],
+        "edges": [],
+    }
+    html = render_graph_html(payload)
+    assert "</script><script>alert(1)</script>" not in html
+    assert "\\u003c/script\\u003e" in html
+    assert "${esc(x[0])}" in html
+    assert "${esc(x[1])}" in html
+
+
 def test_graph_payload_exposes_invocation_audit_summary() -> None:
     assert AUTO_TRADING_DISPLAY_LABELS["auto.capital.flat"] == "资金归属已完成对账 · Capital Attribution Reconciled"
     assert AUTO_TRADING_DISPLAY_LABELS["auto.cash.safety"] == "安全资金账本 · Safety Cash Ledger"
@@ -82,3 +98,16 @@ def test_graph_payload_exposes_invocation_audit_summary() -> None:
     assert "不变量 Invariant" in html
     assert "来源 Provenance" in html
     assert "audit-strip" in html
+
+
+def test_graph_writer_rejects_output_inside_declared_target(tmp_path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    graph = SoftwareGraph()
+
+    with pytest.raises(ValueError, match="inside the target"):
+        write_graph_html(
+            target / "report.html",
+            graph,
+            target_root=target,
+        )
